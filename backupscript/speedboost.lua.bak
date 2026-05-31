@@ -1,0 +1,130 @@
+-- speedboost.lua
+-- Hold Left Alt to smoothly accelerate forward
+-- v5.2 — smoothed memory write, no raw jump
+
+script_name("SpeedBoost")
+script_author("BOJO Dev")
+script_version("5.2")
+
+require 'lib.moonloader'
+local ffi = require 'ffi'
+
+local VEHICLE_POINTER_SELF = 0x00B6F980
+local VEH_SPEED = 68
+local VEH_SPIN = 80
+
+local VK_LMENU = 0xA4  -- Left Alt
+
+local MAX_SPEED = 250.0
+local ACCEL_START = 0.1
+local ACCEL_INCREASE = 0.003
+local ACCEL_MAX = 2.5
+
+local SMOOTH_FACTOR = 0.15
+
+local holdTime = 0
+local smoothX, smoothY, smoothZ = 0, 0, 0
+local hadVehicle = false
+
+local function readPtr(addr)
+    return ffi.cast("uint32_t*", addr)[0]
+end
+
+local function readFloat(addr)
+    return ffi.cast("float*", addr)[0]
+end
+
+local function writeFloat(addr, val)
+    ffi.cast("float*", addr)[0] = val
+end
+
+local function clamp(val, min, max)
+    if val < min then return min end
+    if val > max then return max end
+    return val
+end
+
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+local function getFwdDir(vehAddr)
+    local sx = readFloat(vehAddr + VEH_SPEED)
+    local sy = readFloat(vehAddr + VEH_SPEED + 4)
+    local hspd = math.sqrt(sx*sx + sy*sy)
+    if hspd > 0.5 then
+        return sx / hspd, sy / hspd
+    end
+    local mat = readPtr(vehAddr + 20)
+    if mat == 0 then return 0, 0 end
+    local fx = readFloat(mat + 16)
+    local fy = readFloat(mat + 20)
+    local flen = math.sqrt(fx*fx + fy*fy)
+    if flen < 0.01 then return 0, 0 end
+    return fx / flen, fy / flen
+end
+
+function main()
+    repeat wait(100) until isSampAvailable()
+    wait(3000)
+
+    while true do
+        wait(0)
+
+        if isKeyDown(VK_LMENU) then
+            local v2 = readPtr(VEHICLE_POINTER_SELF)
+            if v2 ~= 0 then
+                if not hadVehicle then
+                    smoothX = readFloat(v2 + VEH_SPEED)
+                    smoothY = readFloat(v2 + VEH_SPEED + 4)
+                    smoothZ = readFloat(v2 + VEH_SPEED + 8)
+                    hadVehicle = true
+                end
+
+                holdTime = holdTime + 1
+
+                local sx = readFloat(v2 + VEH_SPEED)
+                local sy = readFloat(v2 + VEH_SPEED + 4)
+                local sz = readFloat(v2 + VEH_SPEED + 8)
+                local hspd = math.sqrt(sx*sx + sy*sy)
+
+                if hspd < MAX_SPEED then
+                    local dx, dy = getFwdDir(v2)
+                    if dx ~= 0 or dy ~= 0 then
+                        local currentAccel = ACCEL_START + (holdTime * ACCEL_INCREASE)
+                        if currentAccel > ACCEL_MAX then currentAccel = ACCEL_MAX end
+
+                        local targetHspd = hspd + currentAccel
+                        if targetHspd > MAX_SPEED then targetHspd = MAX_SPEED end
+
+                        local newX = dx * targetHspd
+                        local newY = dy * targetHspd
+
+                        smoothX = lerp(smoothX, newX, SMOOTH_FACTOR)
+                        smoothY = lerp(smoothY, newY, SMOOTH_FACTOR)
+                        smoothZ = lerp(smoothZ, sz, SMOOTH_FACTOR)
+
+                        writeFloat(v2 + VEH_SPEED, smoothX)
+                        writeFloat(v2 + VEH_SPEED + 4, smoothY)
+                        writeFloat(v2 + VEH_SPEED + 8, smoothZ)
+
+                        local spinX = readFloat(v2 + VEH_SPIN)
+                        local spinY = readFloat(v2 + VEH_SPIN + 4)
+                        local spinZ = readFloat(v2 + VEH_SPIN + 8)
+                        local spinLen = math.sqrt(spinX*spinX + spinY*spinY + spinZ*spinZ)
+                        if spinLen > 0.5 then
+                            writeFloat(v2 + VEH_SPIN, spinX * 0.9)
+                            writeFloat(v2 + VEH_SPIN + 4, spinY * 0.9)
+                            writeFloat(v2 + VEH_SPIN + 8, spinZ * 0.9)
+                        end
+                    end
+                end
+            else
+                hadVehicle = false
+            end
+        else
+            holdTime = 0
+            hadVehicle = false
+        end
+    end
+end

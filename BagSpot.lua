@@ -332,7 +332,8 @@ local function findBestMatchPosition(searchTerms)
     -- Score each position
     for i, pos in ipairs(savedPositions) do
         local posName = (pos.name or ""):lower()
-        if posName ~= "" then
+        local posNameNorm = posName:gsub("[^%w%s]", "")
+        if posNameNorm ~= "" then
         local score = 0
         local matchedWords = 0
         local exactMatches = 0
@@ -342,7 +343,7 @@ local function findBestMatchPosition(searchTerms)
 
         -- Exact phrase match (HIGHEST priority)
         local fullPhrase = table.concat(searchTerms, " ")
-        if posName:find(fullPhrase, 1, true) then
+        if posNameNorm:find(fullPhrase, 1, true) then
             score = 1000
             matchedWords = totalSearchWords
             exactMatches = totalSearchWords
@@ -354,18 +355,18 @@ local function findBestMatchPosition(searchTerms)
                 local found = false
 
                 -- Word boundary match
-                if posName:match("%f[%w]" .. term .. "%f[%W]") then
+                if posNameNorm:match("%f[%w]" .. term .. "%f[%W]") then
                     score = score + 60
                     matchedWords = matchedWords + 1
                     exactMatches = exactMatches + 1
                     found = true
                 -- Word-prefix match
-                elseif posName:match("%f[%w]" .. term) then
+                elseif posNameNorm:match("%f[%w]" .. term) then
                     score = score + 35
                     matchedWords = matchedWords + 0.75
                     found = true
                 -- Substring match
-                elseif posName:find(term, 1, true) then
+                elseif posNameNorm:find(term, 1, true) then
                     if termLen <= 4 then
                         score = score + 8
                         matchedWords = matchedWords + 0.25
@@ -377,7 +378,7 @@ local function findBestMatchPosition(searchTerms)
                 end
 
                 if found then
-                    if idx == 1 and (posName:match("%f[%w]" .. term) or posName:find(term, 1, true) == 1) then
+                    if idx == 1 and (posNameNorm:match("%f[%w]" .. term) or posNameNorm:find(term, 1, true) == 1) then
                         firstWordFound = true
                     end
                 else
@@ -449,7 +450,7 @@ local function findBestMatchPosition(searchTerms)
     if highestScore >= 40 then
         local bestMatchRatio = 0
         if bestMatch then
-            local posName = (bestMatch.name or ""):lower()
+            local posName = (bestMatch.name or ""):lower():gsub("[^%w%s]", "")
             local totalWords = #searchTerms
             local matched = 0
             for _, term in ipairs(searchTerms) do
