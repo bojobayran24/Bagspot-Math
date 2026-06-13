@@ -32,7 +32,6 @@ ffi.cdef[[void __stdcall Beep(uint32_t dwFreq, uint32_t dwDuration);]]
 local kernel32 = ffi.load('kernel32')
 local encoding = require 'encoding'
 encoding.default = 'CP1251'
-local u8 = encoding.UTF8
 local sampev = require 'lib.samp.events'
 
 -- Vehicle stop helpers (for Auto-Stop at Focus)
@@ -82,13 +81,10 @@ local CONFIG = {
     EXPORT_FILE = getWorkingDirectory() .. "\\config\\SavedPositions_Export.txt",
     BACKUP_FILE = getWorkingDirectory() .. "\\config\\SavedPositions_Backup.json",
     ROUTES_FILE = getWorkingDirectory() .. "\\config\\SavedRoutes.json",
-    HOTKEY = vkeys.VK_F10,
-    --ESP_HOTKEY = vkeys.VK_F9,
     WINDOW_TITLE = "BagSpot",
     MAX_NAME_LENGTH = 64,
     TELEPORT_COOLDOWN = 2,
     AUTO_BACKUP_INTERVAL = 20, -- Backup every 20 saves
-    MAX_ESP_DISTANCE = 20000.0, -- Maximum distance to show ESP markers (entire map)
     MONEYBAG_TP_DISTANCE = 300.0, -- Auto-TP only when within 300m
     
     -- Auto-Teleport Settings
@@ -118,17 +114,16 @@ local CONFIG = {
         WARNING = imgui.ImVec4(1.0, 0.5, 0.0, 1.0),
         ROUTE = imgui.ImVec4(0.5, 0.0, 0.8, 1.0)
     },
-    ESP_COLORS = {
-        DEFAULT = 0xFFFFFFFF
-    }
 }
+
+-- Config persistence path
+local CFG_PATH = getWorkingDirectory() .. "\\config\\bagspot.cfg"
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- STATE VARIABLES
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Fonts for ESP rendering
-local font = nil
 local espFont = nil
 local gpsArrowTex = nil
 
@@ -145,7 +140,6 @@ local renameBuffer = imgui.new.char[CONFIG.MAX_NAME_LENGTH]("")
 local statusMessage = ""
 local statusMessageTime = 0
 local lastTeleportTime = 0
-local teleportCooldown = imgui.new.int(0)
 local saveCounter = 0
 
 -- New UI state variables
@@ -156,7 +150,6 @@ local espDistance = imgui.new.float(10000.0) -- Default 10km (entire map)
 -- Moneybag Tracker (model 1550 pickup ESP)
 local showMoneybags = imgui.new.bool(false)
 local autoMoneybagTP = imgui.new.bool(false)
-local moneybagGrabber = imgui.new.bool(false)
 local soundAlert = imgui.new.bool(true)
 local moneyBags = {}
 local moneybagTPPending = false
@@ -166,16 +159,10 @@ local moneybagTPCooldown = 0
 local moneybagPendingX = 0
 local moneybagPendingY = 0
 local moneybagPendingZ = 0
-local moneybagOriginX = 0
-local moneybagOriginY = 0
-local moneybagOriginZ = 0
-local moneybagGrabActive = false
-local moneybagGrabTimer = 0
-local GRAB_RETURN_DELAY = 0.2
 local lastProxBeep = 0
-local showDistance = imgui.new.bool(true)
 
 -- GPS direction tracking (distance delta per frame)
+local prevPosDist = {}
 local prevBagDist = {}
 local prevFocusDist = nil
 
@@ -189,11 +176,11 @@ local routeBuilder = {} -- Temporary array for building routes
 -- Performance cache
 local distanceCache = {}
 local lastCacheUpdate = 0
-local cacheUpdateInterval = 0.5 -- Update cache every 500ms
+local cacheUpdateInterval = 5.0 -- Update cache every 5s
 
 -- Auto-Teleport Variables
 local autoTeleportEnabled = imgui.new.bool(false)
-local lastDetectedKeyword = ""
+local autoTPDelay = imgui.new.float(4.0)
 local keywordDetectedTime = 0
 local autoTeleportPending = false
 local pendingSearchTerms = {}
@@ -205,7 +192,6 @@ local autoFocusEnabled = imgui.new.bool(true) -- Toggleable auto-focus from chat
 local autoStopFocus = imgui.new.bool(false) -- Auto-stop vehicle when near focus
 local espFocusPosition = nil
 local espFocusTime = 0
-local ESP_FOCUS_DURATION = 60
 
 -- Import/Export variables
 local importText = imgui.new.char[10000]("")
@@ -587,6 +573,62 @@ local function performAutoTeleport(searchTerms)
     end
     
     return false
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- CONFIG PERSISTENCE
+-- ─────────────────────────────────────────────────────────────────────────────
+
+function saveConfig()
+    local data = {
+        autoTeleportEnabled = autoTeleportEnabled[0],
+        autoTPDelay = autoTPDelay[0],
+        showESP = showESP[0],
+        espDistance = espDistance[0],
+        autoFocusEnabled = autoFocusEnabled[0],
+        autoStopFocus = autoStopFocus[0],
+        showMoneybags = showMoneybags[0],
+        autoMoneybagTP = autoMoneybagTP[0],
+        soundAlert = soundAlert[0],
+        sortMode = sortMode[0],
+    }
+    local dir = CFG_PATH:match("(.+)\\[^\\]+$")
+    if dir and not doesDirectoryExist(dir) then
+        pcall(createDirectory, dir)
+    end
+    local ok, f = pcall(io.open, CFG_PATH, "w")
+    if not ok or not f then return end
+    f:write("return {\n")
+    for k, v in pairs(data) do
+        local sv
+        if type(v) == "boolean" then sv = v and "true" or "false"
+        else sv = tostring(v) end
+        f:write(string.format("  %s = %s,\n", k, sv))
+    end
+    f:write("}\n")
+    f:close()
+end
+
+function loadConfig()
+    local ok, f = pcall(io.open, CFG_PATH, "r")
+    if not ok or not f then return end
+    local content = f:read("*all")
+    f:close()
+    local ok2, cfg = pcall(loadstring, content)
+    if not ok2 or not cfg then return end
+    local t = cfg()
+    if not t then return end
+
+    if t.autoTeleportEnabled ~= nil then autoTeleportEnabled[0] = t.autoTeleportEnabled end
+    if t.autoTPDelay ~= nil then autoTPDelay[0] = t.autoTPDelay end
+    if t.showESP ~= nil then showESP[0] = t.showESP end
+    if t.espDistance ~= nil then espDistance[0] = t.espDistance end
+    if t.autoFocusEnabled ~= nil then autoFocusEnabled[0] = t.autoFocusEnabled end
+    if t.autoStopFocus ~= nil then autoStopFocus[0] = t.autoStopFocus end
+    if t.showMoneybags ~= nil then showMoneybags[0] = t.showMoneybags end
+    if t.autoMoneybagTP ~= nil then autoMoneybagTP[0] = t.autoMoneybagTP end
+    if t.soundAlert ~= nil then soundAlert[0] = t.soundAlert end
+    if t.sortMode ~= nil then sortMode[0] = t.sortMode end
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -1278,7 +1320,6 @@ local function teleportToPosition(pos)
     end
     
     lastTeleportTime = currentTime
-    teleportCooldown[0] = CONFIG.TELEPORT_COOLDOWN
     
     setStatusMessage("Teleported to: " .. (pos.name or "Unknown"))
     return true
@@ -1378,13 +1419,6 @@ local function renderRotatedArrow(sx, sy, angleDeg, size, color, glowColor)
         end
         renderDrawPolygon(sx - size, sy - size, size * 2, size * 2, 3, angleDeg, color)
     end
-end
-
--- Direction label: FRONT or BACK
-local function getDirectionLabel(angleDeg)
-    if type(angleDeg) ~= "number" then return "FRONT" end
-    if math.abs(angleDeg) < 90 then return "FRONT"
-    else return "BACK" end
 end
 
 -- Render GPS guide ring at bottom-center of screen
@@ -1609,26 +1643,22 @@ end
 -- ESP RENDERING SYSTEM
 -- ─────────────────────────────────────────────────────────────────────────────
 
-local function worldToScreen(posX, posY, posZ)
-    local result, screenX, screenY = convert3DCoordsToScreen(posX, posY, posZ)
-    if result then
-        local behindPlayer = false
-        local camX, camY, camZ = getActiveCameraCoordinates()
-        local angleX = posX - camX
-        local angleY = posY - camY
-        local angleZ = posZ - camZ
-        
-        -- Check if behind camera
-        local camPointX, camPointY, camPointZ = getActiveCameraPointAt()
-        local dotProduct = angleX * (camPointX - camX) + angleY * (camPointY - camY) + angleZ * (camPointZ - camZ)
-        
-        if dotProduct < 0 then
-            behindPlayer = true
-        end
-        
-        return true, screenX, screenY, behindPlayer
+local GROUP_COLORS = {
+    LS = 0x33AA33,
+    SF = 0x33CCFF,
+    LV = 0xFFFF00,
+    OTHER = 0xCC66CC,
+    NEW = 0x00CCCC,
+}
+
+local function getScreenPos(x, y, z)
+    local result, sx, sy = convert3DCoordsToScreen(x, y, z)
+    if type(result) == "boolean" then
+        if result then return sx, sy end
+    else
+        return result, sx
     end
-    return false, 0, 0, false
+    return nil, nil
 end
 
 local function renderPositionESP()
@@ -1639,18 +1669,8 @@ local function renderPositionESP()
     -- Draw focus overlay if a position is currently focused (orange pulsing line)
     if espFocusPosition then
         local dist = calculateDistance(playerX, playerY, playerZ, espFocusPosition.x, espFocusPosition.y, espFocusPosition.z)
-        repeat
-        local a, b, c = convert3DCoordsToScreen(espFocusPosition.x, espFocusPosition.y, espFocusPosition.z)
-        local sx, sy
-        if type(a) == "boolean" then
-            if not a then break end
-            sx, sy = b, c
-        else
-            sx, sy = a, b
-        end
-        if not (sx and sy) then break end
-
-        if sx > 0 and sx < scrW and sy > 0 and sy < scrH then
+        local sx, sy = getScreenPos(espFocusPosition.x, espFocusPosition.y, espFocusPosition.z)
+        if sx and sx > 0 and sx < scrW and sy > 0 and sy < scrH then
             local pulse = (math.sin(os.clock() * 3) + 1) / 2
             local alpha = math.floor(0xF0 * (0.6 + pulse * 0.4))
             local color = (alpha * 0x1000000) + 0xFF8800
@@ -1662,7 +1682,6 @@ local function renderPositionESP()
                 renderFontDrawText(espFont, label, sx - 61, sy - 21, color)
             end
         end
-        until true
 
         if espFont then
             local heading = getCharHeading(PLAYER_PED)
@@ -1674,7 +1693,6 @@ local function renderPositionESP()
             renderGPSRing(gpsCx, gpsCy, 28, focusAngle, espFocusPosition.name, dist, focusDelta, 0xFFFF8800)
         end
 
-        -- Auto-clear when within 2m (or when auto-stop triggers)
         if dist < 2 then
             espFocusPosition = nil
         end
@@ -1686,30 +1704,44 @@ local function renderPositionESP()
 
     for i, pos in ipairs(savedPositions) do
         local dist = calculateDistance(playerX, playerY, playerZ, pos.x, pos.y, pos.z)
-        if dist <= maxDist then
-            repeat
-            local a, b, c = convert3DCoordsToScreen(pos.x, pos.y, pos.z)
-            local sx, sy
-            if type(a) == "boolean" then
-                if not a then break end
-                sx, sy = b, c
-            else
-                sx, sy = a, b
-            end
-            if not (sx and sy) then break end
+        local prevDist = prevPosDist[i]
+        prevPosDist[i] = dist
 
-            if sx > 0 and sx < scrW and sy > 0 and sy < scrH then
+        if dist <= maxDist then
+            local sx, sy = getScreenPos(pos.x, pos.y, pos.z)
+            if sx and sx > 0 and sx < scrW and sy > 0 and sy < scrH then
+                local groupColor = GROUP_COLORS[pos.group or ""]
+                local baseColor = groupColor or 0x00BFFF
                 local grad = math.min(1, dist / 5000)
                 local alpha = math.floor(0xCC * (1 - grad * 0.5))
-                local color = (alpha * 0x1000000) + 0x00BFFF
+                local color = (alpha * 0x1000000) + baseColor
+
                 renderDrawLine(scrW / 2, scrH, sx, sy, 1.0, color)
                 renderDrawPolygon(sx - 3, sy - 3, 6, 6, 4, 0, color)
+
                 if espFont then
-                    renderFontDrawText(espFont, pos.name or ("#" .. i), sx + 6, sy - 8, 0x80000000)
-                    renderFontDrawText(espFont, pos.name or ("#" .. i), sx + 5, sy - 9, color)
+                    local deltaStr = ""
+                    local deltaClr = color
+                    if prevDist then
+                        local delta = prevDist - dist
+                        if delta > 1 then
+                            deltaStr = string.format(" %.0fm", delta)
+                            deltaClr = 0xFF00FF00
+                        elseif delta < -1 then
+                            deltaStr = string.format(" +%.0fm", math.abs(delta))
+                            deltaClr = 0xFFFF4444
+                        end
+                    end
+                    local label = (pos.name or ("#" .. i)) .. string.format(" (%.0fm)", dist)
+                    renderFontDrawText(espFont, label, sx + 6, sy - 8, 0x80000000)
+                    renderFontDrawText(espFont, label, sx + 5, sy - 9, color)
+
+                    if deltaStr ~= "" then
+                        renderFontDrawText(espFont, deltaStr, sx + 9, sy + 6, 0x80000000)
+                        renderFontDrawText(espFont, deltaStr, sx + 8, sy + 5, deltaClr)
+                    end
                 end
             end
-            until true
         end
     end
 end
@@ -1911,6 +1943,19 @@ local function renderMenu()
         imgui.SetTooltip("Toggle auto-teleport on chat events (GoldPOT, Hunt, etc.)\\nHelps avoid bans by enabling/disabling quickly")
     end
     
+    imgui.SameLine()
+    imgui.Text("Delay:")
+    imgui.SameLine()
+    imgui.PushItemWidth(120)
+    imgui.PushStyleVarFloat(imgui.StyleVar.FrameRounding, 4.0)
+    if imgui.SliderFloat("##AutoTPDelay", autoTPDelay, 0.5, 15.0, "%.1fs") then
+    end
+    imgui.PopStyleVar()
+    imgui.PopItemWidth()
+    if imgui.IsItemHovered() then
+        imgui.SetTooltip("Seconds to wait before auto-teleporting (0.5s - 15s)")
+    end
+    
     imgui.Separator()
     
     -- ─────────────────────────────────────────────────────────────────────────
@@ -1956,52 +2001,38 @@ local function renderMenu()
     -- ─────────────────────────────────────────────────────────────────────────
     -- SEARCH AND FILTER
     -- ─────────────────────────────────────────────────────────────────────────
-    
-    -- ESP Controls
-    imgui.Text("ESP Hunt Mode:")
-    imgui.SameLine()
-    
+
+    -- ESP Controls - Row 1
     local espButtonColor = showESP[0] and imgui.ImVec4(0.2, 0.8, 0.2, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
     imgui.PushStyleColor(imgui.Col.Button, espButtonColor)
     if imgui.Button(showESP[0] and "ESP: ON" or "ESP: OFF", imgui.ImVec2(130, 25)) then
         showESP[0] = not showESP[0]
     end
     imgui.PopStyleColor()
-    
     if imgui.IsItemHovered() then
         imgui.SetTooltip("Show all saved positions on screen (perfect for manual hunting!)")
     end
     
     imgui.SameLine()
-    imgui.Text("Distance:")
+    imgui.Text("Dist:")
     imgui.SameLine()
     imgui.PushItemWidth(100)
     imgui.SliderFloat("##ESPDist", espDistance, 100, 20000, "%.0fm")
     imgui.PopItemWidth()
-    
     if imgui.IsItemHovered() then
-        imgui.SetTooltip("Set to 10000+ to see entire map")
+        imgui.SetTooltip("Max distance to show ESP markers")
     end
     
-    -- Auto Focus toggle (auto-focus on hint detection)
     imgui.SameLine()
     local afColor = autoFocusEnabled[0] and imgui.ImVec4(0.9, 0.5, 0.0, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
     imgui.PushStyleColor(imgui.Col.Button, afColor)
-    if imgui.Button(autoFocusEnabled[0] and "AutoFocus: ON" or "AutoFocus: OFF", imgui.ImVec2(120, 25)) then
+    if imgui.Button(autoFocusEnabled[0] and "AutoFocus: ON" or "AutoFocus: OFF", imgui.ImVec2(110, 25)) then
         autoFocusEnabled[0] = not autoFocusEnabled[0]
         setStatusMessage(autoFocusEnabled[0] and "Auto-focus enabled (hints set focus)" or "Auto-focus disabled")
     end
     imgui.PopStyleColor()
-    if imgui.IsItemHovered() then
-        if autoFocusEnabled[0] then
-            imgui.SetTooltip("Auto-focus from hints is ON. Toggle OFF to disable.")
-        else
-            imgui.SetTooltip("Auto-focus from hints is OFF. Use Set Focus button to manually focus.")
-        end
-    end
 
-    -- Manual "Set Focus" button (works even when auto-focus is OFF)
-    imgui.SameLine()
+    -- ESP Controls - Row 2
     local hasHint = lastHintedSavedIndex ~= nil
     local sfColor = hasHint and imgui.ImVec4(0.2, 0.6, 0.8, 1.0) or imgui.ImVec4(0.3, 0.3, 0.4, 0.4)
     imgui.PushStyleColor(imgui.Col.Button, sfColor)
@@ -2044,7 +2075,7 @@ local function renderMenu()
     -- Moneybag Tracker toggle
     local mbColor = showMoneybags[0] and imgui.ImVec4(0.9, 0.7, 0.0, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
     imgui.PushStyleColor(imgui.Col.Button, mbColor)
-    if imgui.Button(showMoneybags[0] and "Moneybags: ON ($)" or "Moneybags: OFF", imgui.ImVec2(150, 25)) then
+    if imgui.Button(showMoneybags[0] and "Moneybags: ON" or "Moneybags: OFF", imgui.ImVec2(150, 25)) then
         showMoneybags[0] = not showMoneybags[0]
     end
     imgui.PopStyleColor()
@@ -2071,17 +2102,7 @@ local function renderMenu()
     if imgui.IsItemHovered() then
         imgui.SetTooltip("Beep on hint detection and moneybag spawn")
     end
-    imgui.SameLine()
-    local grabColor = moneybagGrabber[0] and imgui.ImVec4(0.2, 0.6, 0.8, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
-    imgui.PushStyleColor(imgui.Col.Button, grabColor)
-    if imgui.Button(moneybagGrabber[0] and "Grabber: ON" or "Grabber: OFF", imgui.ImVec2(100, 25)) then
-        moneybagGrabber[0] = not moneybagGrabber[0]
-    end
-    imgui.PopStyleColor()
-    if imgui.IsItemHovered() then
-        imgui.SetTooltip("Flash-grab: TP to moneybag, auto-return to position")
-    end
-
+    
     imgui.Separator()
     
     -- Sort Mode
@@ -2614,7 +2635,6 @@ function main()
     end
     
     -- Create fonts for ESP rendering
-    font = renderCreateFont("Arial", 10, 5)
     espFont = renderCreateFont("Arial", 12, 5)
     -- Load GPS arrow texture
     xpcall(function() gpsArrowTex = renderLoadTexture(getWorkingDirectory() .. "\\config\\gps-arrow.png") end, function() end)
@@ -2646,6 +2666,9 @@ function main()
     
     -- Load hint analytics
     loadHintAnalytics()
+    
+    -- Load persistent config (auto-TP delay, toggles, etc.)
+    loadConfig()
     
     -- Chat commands
     sampRegisterChatCommand("spos", function(params)
@@ -2745,13 +2768,22 @@ function main()
     
     -- Main loop
     local keyPressed = false
+    local saveTimer = 0
+    local autoStopped = false
     while true do
         wait(0)
+
+        -- Auto-save persistent config every ~2 seconds
+        saveTimer = saveTimer + 1
+        if saveTimer >= 200 then
+            saveTimer = 0
+            saveConfig()
+        end
 
         -- Update distance cache periodically for performance (wrapped: crash-safe)
         pcall(updateDistanceCache)
 
-        -- Auto-Stop at Focus (MUST run before renderPositionESP which clears focus at 2m)
+        -- Auto-Stop at Focus (once per entry, not every frame — prevents getting stuck)
         if autoStopFocus[0] and espFocusPosition then
             local lok = isCharInAnyCar(PLAYER_PED)
             if lok then
@@ -2761,8 +2793,11 @@ function main()
                     local dy = espFocusPosition.y - py
                     local dz = espFocusPosition.z - pz
                     local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                    if dist <= 2.5 then
+                    if dist <= 2.5 and not autoStopped then
                         doAutoStopVeh()
+                        autoStopped = true
+                    elseif dist > 3.0 then
+                        autoStopped = false
                     end
                 end
             end
@@ -2790,33 +2825,6 @@ function main()
                     if os.clock() - (lastProxBeep or 0) > 2 then
                         playBeep(1000, 80)
                         lastProxBeep = os.clock()
-                    end
-                end
-            end
-        end
-        
-        -- Standalone Grabber mode (independent of AutoTP)
-        if not autoMoneybagTP[0] and moneybagGrabber[0] and not moneybagGrabActive and not moneybagTPPending then
-            local now = os.clock()
-            if now >= moneybagTPCooldown then
-                local mbPx, mbPy, mbPz = getCharCoordinates(PLAYER_PED)
-                if mbPx then
-                    local nearestDist, nearestPos
-                    for id, pos in pairs(moneyBags) do
-                        local d = calculateDistance(mbPx, mbPy, mbPz, pos.x, pos.y, pos.z)
-                        if not nearestDist or d < nearestDist then
-                            nearestDist = d
-                            nearestPos = pos
-                        end
-                    end
-                    if nearestPos and nearestDist and nearestDist <= CONFIG.MONEYBAG_TP_DISTANCE then
-                        moneybagOriginX, moneybagOriginY, moneybagOriginZ = mbPx, mbPy, mbPz
-                        moneybagGrabActive = true
-                        moneybagGrabTimer = os.clock()
-                        setCharCoordinates(PLAYER_PED, nearestPos.x, nearestPos.y, nearestPos.z)
-                        restoreCameraJumpcut()
-                        moneybagTPCooldown = os.clock() + 5
-                        msg("found", "Grabber: flash-grabbed moneybag!")
                     end
                 end
             end
@@ -2851,30 +2859,11 @@ function main()
             local remaining = moneybagTPDelay - (os.clock() - moneybagTPTime)
             if remaining <= 0 then
                 playBeep(800, 100)
-                -- Save origin if Grabber is enabled
-                if moneybagGrabber[0] and not moneybagGrabActive then
-                    local ox, oy, oz = getCharCoordinates(PLAYER_PED)
-                    moneybagOriginX, moneybagOriginY, moneybagOriginZ = ox, oy, oz
-                    moneybagGrabActive = true
-                    moneybagGrabTimer = os.clock()
-                end
                 setCharCoordinates(PLAYER_PED, moneybagPendingX, moneybagPendingY, moneybagPendingZ)
                 restoreCameraJumpcut()
                 moneybagTPPending = false
-                if not moneybagGrabber[0] then
-                    moneybagTPCooldown = os.clock() + 5
-                end
-                msg("found", "Moneybag grabbed")
-            end
-        end
-        -- Grabber return: after brief delay, TP back to origin
-        if moneybagGrabActive then
-            if os.clock() - moneybagGrabTimer >= GRAB_RETURN_DELAY then
-                setCharCoordinates(PLAYER_PED, moneybagOriginX, moneybagOriginY, moneybagOriginZ)
-                restoreCameraJumpcut()
-                moneybagGrabActive = false
                 moneybagTPCooldown = os.clock() + 5
-                msg("passive", "Returned to origin")
+                msg("found", "Moneybag grabbed")
             end
         end
         
@@ -2894,15 +2883,6 @@ function main()
                 autoTeleportPending = false
                 performAutoTeleport(pendingSearchTerms)
             end
-        end
-        
-        -- Update cooldown counter
-        local currentTime = os.clock()
-        local timeSinceLast = currentTime - lastTeleportTime
-        if timeSinceLast < CONFIG.TELEPORT_COOLDOWN then
-            teleportCooldown[0] = math.ceil(CONFIG.TELEPORT_COOLDOWN - timeSinceLast)
-        else
-            teleportCooldown[0] = 0
         end
         
         -- Toggle menu with F10
@@ -2959,13 +2939,11 @@ function renderMoneybagESP()
     local now = os.clock()
     local playerHeading = getCharHeading(PLAYER_PED)
 
-    -- Clean up stale distance entries
     for id in pairs(prevBagDist) do
         if not moneyBags[id] then prevBagDist[id] = nil end
     end
 
     for id, pos in pairs(moneyBags) do
-        repeat
         local dist = calculateDistance(px, py, pz, pos.x, pos.y, pos.z)
         if dist < nearestDist then
             nearestDist = dist
@@ -2974,17 +2952,9 @@ function renderMoneybagESP()
         end
         bagCount = bagCount + 1
 
-        local a, b, c = convert3DCoordsToScreen(pos.x, pos.y, pos.z)
-        local sx, sy
-        if type(a) == "boolean" then
-            if not a then break end
-            sx, sy = b, c
-        else
-            sx, sy = a, b
-        end
-        if not (sx and sy) then break end
+        local sx, sy = getScreenPos(pos.x, pos.y, pos.z)
+        if not sx then break end
 
-        -- Proximity pulse
         local pulse = 0
         local pulseSpeed = 0
         if dist < 30 then
@@ -2995,7 +2965,6 @@ function renderMoneybagESP()
             pulse = 0.5 + 0.5 * math.abs(math.sin(now * pulseSpeed))
         end
 
-        -- Smooth color: green < 80 → yellow < 300 → red > 800
         local r, g, b
         if dist < 80 then
             r, g, b = 0, 255, 0
@@ -3014,26 +2983,21 @@ function renderMoneybagESP()
         local glowColor = ((math.floor(alpha * 0.3) % 256) * 0x1000000) + (r * 0x10000) + (g * 0x100) + b
         local textColor = (0xFF * 0x1000000) + (r * 0x10000) + (g * 0x100) + b
 
-        -- Pulsing size and line width
         local markerSize = pulse > 0 and 4 + math.floor(6 * pulse) or 4
         local lineWidth = pulse > 0 and 1.5 + 3.0 * pulse or 1.5
 
         if sx > 0 and sx < scrW and sy > 0 and sy < scrH then
-            -- Glow line
             renderDrawLine(scrW / 2, scrH, sx, sy, lineWidth + 2.5, glowColor)
             renderDrawLine(scrW / 2, scrH, sx, sy, lineWidth, color)
-            -- Marker
             renderDrawPolygon(sx - markerSize, sy - markerSize, markerSize * 2, markerSize * 2, 4, 0, color)
-            local label = dist < 30 and string.format("$ %.0fm!", dist) or string.format("$ %.0fm", dist)
+            local label = dist < 30 and string.format("%.0fm!", dist) or string.format("%.0fm", dist)
             if espFont then
                 renderFontDrawText(espFont, label, sx + 7, sy - 9, 0x80000000)
                 renderFontDrawText(espFont, label, sx + 6, sy - 10, textColor)
             end
-            -- Direction arrow at bag (white = direction only)
             local arrowDeg = getDirectionArrowDeg(px, py, playerHeading, pos.x, pos.y)
             local arrSize = pulse > 0 and 10 or 7
             renderRotatedArrow(sx, sy - 18, arrowDeg, arrSize, 0xCCFFFFFF, 0x44FFFFFF)
-            -- Track distance for GPS ring delta (no text rendered per-bag)
             prevBagDist[id] = dist
         else
             local ex = math.max(15, math.min(scrW - 15, sx))
@@ -3041,22 +3005,19 @@ function renderMoneybagESP()
             renderDrawLine(scrW / 2, scrH, ex, ey, 1.5 + pulse, 0x44FFFF00)
             renderDrawLine(scrW / 2, scrH, ex, ey, 0.5 + pulse, 0x88FFFF00)
             if espFont then
-                renderFontDrawText(espFont, string.format("$ %.0fm", dist), ex + 9, ey - 7, 0x80000000)
-                renderFontDrawText(espFont, string.format("$ %.0fm", dist), ex + 8, ey - 8, 0xAAFFFF00)
+                renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 9, ey - 7, 0x80000000)
+                renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 8, ey - 8, 0xAAFFFF00)
             end
-            -- Off-screen direction chevron
             local offAngle = math.deg(math.atan2(sy - scrH/2, sx - scrW/2))
             renderRotatedArrow(ex, ey - 16, offAngle, 6, 0xAAFFFF00)
         end
-        until true
     end
 
-    -- Top-right HUD
     if espFont then
         local hudX, hudY = scrW - 15, 25
         if bagCount > 0 then
-            renderFontDrawText(espFont, string.format("$ BAGS: %d", bagCount), hudX - 95, hudY - 1, 0x80000000)
-            renderFontDrawText(espFont, string.format("$ BAGS: %d", bagCount), hudX - 96, hudY - 2, 0xFFFFFF00)
+            renderFontDrawText(espFont, string.format("BAGS: %d", bagCount), hudX - 95, hudY - 1, 0x80000000)
+            renderFontDrawText(espFont, string.format("BAGS: %d", bagCount), hudX - 96, hudY - 2, 0xFFFFFF00)
             local nearText = string.format("Nearest: %dm", math.floor(nearestDist))
             if nearestDist < 30 then
                 renderFontDrawText(espFont, nearText .. " !", hudX - 125, hudY + 13, 0x80000000)
@@ -3068,19 +3029,13 @@ function renderMoneybagESP()
         end
     end
 
-    -- Bottom-center GPS guide ring for nearest moneybag (skip if focus active)
     if not espFocusPosition and nearestBagId and moneyBags[nearestBagId] then
         local gpsCx = scrW / 2
         local gpsCy = scrH - 60
         local gpsDelta = prevBagDist[nearestBagId] and (prevBagDist[nearestBagId] - nearestDist) or nil
-        renderGPSRing(gpsCx, gpsCy, 28, nearestBagAngle, "$ BAG", nearestDist, gpsDelta, 0xFFFFFF00)
+        renderGPSRing(gpsCx, gpsCy, 28, nearestBagAngle, "BAG", nearestDist, gpsDelta, 0xFFFFFF00)
     end
-
 end
-
--- ─────────────────────────────────────────────────────────────────────────────
--- MONEYBAG MINI-RADAR
--- ─────────────────────────────────────────────────────────────────────────────
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CHAT EVENT HANDLER FOR AUTO-TELEPORT
@@ -3244,9 +3199,8 @@ function sampev.onServerMessage(color, text)
         
         -- Auto-teleport (only if enabled)
         if autoTeleportEnabled[0] then
-            currentTeleportDelay = math.random(CONFIG.AUTO_TELEPORT_DELAY_MIN, CONFIG.AUTO_TELEPORT_DELAY_MAX)
+            currentTeleportDelay = autoTPDelay[0]
             
-            lastDetectedKeyword = keyword
             keywordDetectedTime = os.clock()
             autoTeleportPending = true
             pendingSearchTerms = searchTerms

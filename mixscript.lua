@@ -18,7 +18,7 @@ local speedBoostEnabled = imgui.new.bool(false)
 
 
 -- Config persistence
-local CFG_PATH = "config/mixscript.cfg"
+local CFG_PATH = getWorkingDirectory() .. "\\config\\mixscript.cfg"
 
 -- VK codes
 local VK_F9 = 0x78
@@ -213,6 +213,10 @@ local function saveConfig()
         reactMinDelay = reactMinDelay[0],
         reactMaxDelay = reactMaxDelay[0],
     }
+    local dir = CFG_PATH:match("(.+)\\[^\\]+$")
+    if dir and not doesDirectoryExist(dir) then
+        pcall(createDirectory, dir)
+    end
     local ok, f = pcall(io.open, CFG_PATH, "w")
     if not ok or not f then return end
     f:write("return {\n")
