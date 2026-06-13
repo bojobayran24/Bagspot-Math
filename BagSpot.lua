@@ -35,6 +35,34 @@ encoding.default = 'CP1251'
 local u8 = encoding.UTF8
 local sampev = require 'lib.samp.events'
 
+-- Vehicle stop helpers (for Auto-Stop at Focus)
+local VEHICLE_POINTER_SELF = 0x00B6F980
+local VEH_SPEED = 68
+local VEH_SPIN = 80
+
+local function readPtr(addr)
+    return ffi.cast("uint32_t*", addr)[0]
+end
+
+local function writeFloat(addr, val)
+    ffi.cast("float*", addr)[0] = val
+end
+
+local function zeroVec(base)
+    if base == 0 then return end
+    writeFloat(base, 0.0)
+    writeFloat(base + 4, 0.0)
+    writeFloat(base + 8, 0.0)
+end
+
+local function doAutoStopVeh()
+    local v2 = readPtr(VEHICLE_POINTER_SELF)
+    if v2 == 0 then return end
+    zeroVec(v2 + VEH_SPEED)
+    zeroVec(v2 + VEH_SPIN)
+    printStringNow("~w~FOCUS ~g~STOP", 300, 1.0)
+end
+
 local C = { GOLD = "{BFA100}", GREEN = "{33AA33}", CYAN = "{33CCFF}", GRAY = "{888888}", RED = "{FF5555}", WHITE = "{FFFFFF}", YELLOW = "{FFFF00}", ORANGE = "{FFA500}" }
 local PREFIX = C.GOLD .. "[BS]" .. C.WHITE .. " > "
 
@@ -174,6 +202,7 @@ local targetPositionName = ""
 
 -- ESP Focus Mode (auto-focus from hints with toggle)
 local autoFocusEnabled = imgui.new.bool(true) -- Toggleable auto-focus from chat hints
+local autoStopFocus = imgui.new.bool(false) -- Auto-stop vehicle when near focus
 local espFocusPosition = nil
 local espFocusTime = 0
 local ESP_FOCUS_DURATION = 60
@@ -1645,8 +1674,8 @@ local function renderPositionESP()
             renderGPSRing(gpsCx, gpsCy, 28, focusAngle, espFocusPosition.name, dist, focusDelta, 0xFFFF8800)
         end
 
-        -- Auto-clear when within 10m
-        if dist < 10 then
+        -- Auto-clear when within 2m (or when auto-stop triggers)
+        if dist < 2 then
             espFocusPosition = nil
         end
     end
@@ -1998,7 +2027,20 @@ local function renderMenu()
             imgui.SetTooltip("No hint detected yet")
         end
     end
-    
+
+    -- Auto-Stop at Focus toggle
+    imgui.SameLine()
+    local asfColor = autoStopFocus[0] and imgui.ImVec4(0.2, 0.7, 0.4, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
+    imgui.PushStyleColor(imgui.Col.Button, asfColor)
+    if imgui.Button(autoStopFocus[0] and "AutoStop: ON" or "AutoStop: OFF", imgui.ImVec2(100, 25)) then
+        autoStopFocus[0] = not autoStopFocus[0]
+        setStatusMessage(autoStopFocus[0] and "Auto-stop at focus enabled" or "Auto-stop at focus disabled")
+    end
+    imgui.PopStyleColor()
+    if imgui.IsItemHovered() then
+        imgui.SetTooltip("Automatically stop vehicle when within 2.5m of focus position")
+    end
+
     -- Moneybag Tracker toggle
     local mbColor = showMoneybags[0] and imgui.ImVec4(0.9, 0.7, 0.0, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
     imgui.PushStyleColor(imgui.Col.Button, mbColor)
@@ -2708,7 +2750,24 @@ function main()
 
         -- Update distance cache periodically for performance (wrapped: crash-safe)
         pcall(updateDistanceCache)
-        
+
+        -- Auto-Stop at Focus (MUST run before renderPositionESP which clears focus at 2m)
+        if autoStopFocus[0] and espFocusPosition then
+            local lok = isCharInAnyCar(PLAYER_PED)
+            if lok then
+                local px, py, pz = getCharCoordinates(PLAYER_PED)
+                if px then
+                    local dx = espFocusPosition.x - px
+                    local dy = espFocusPosition.y - py
+                    local dz = espFocusPosition.z - pz
+                    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    if dist <= 2.5 then
+                        doAutoStopVeh()
+                    end
+                end
+            end
+        end
+
         -- Render ESP markers (wrapped: crash-safe)
         pcall(renderPositionESP)
         
@@ -3016,6 +3075,7 @@ function renderMoneybagESP()
         local gpsDelta = prevBagDist[nearestBagId] and (prevBagDist[nearestBagId] - nearestDist) or nil
         renderGPSRing(gpsCx, gpsCy, 28, nearestBagAngle, "$ BAG", nearestDist, gpsDelta, 0xFFFFFF00)
     end
+
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────

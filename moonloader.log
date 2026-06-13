@@ -1,5 +1,5 @@
-[07:25:37.071536] (system)	Session started.
-[07:25:37.071869] (debug)	Module handle: 71320000
+[01:53:34.834632] (system)	Session started.
+[01:53:34.835632] (debug)	Module handle: 71D80000
 
 MoonLoader v.026.5-beta loaded.
 Developers: FYP, hnnssy, EvgeN 1137
@@ -7,27 +7,27 @@ Developers: FYP, hnnssy, EvgeN 1137
 Copyright (c) 2016, BlastHack Team
 http://blast.hk/moonloader/
 
-[07:25:37.071869] (info)	Working directory: C:\Games\GTA San Andreas\moonloader
-[07:25:37.071869] (debug)	FP Control: 0009001F
-[07:25:37.071869] (debug)	Game: GTA SA 1.0.0.0 US
-[07:25:37.071869] (system)	Installing pre-game hooks...
-[07:25:37.074677] (system)	Hooks installed.
-[07:25:39.822168] (debug)	Initializing opcode handler table
-[07:25:39.822168] (debug)	package.path = C:\Games\GTA San Andreas\moonloader\lib\?.lua;C:\Games\GTA San Andreas\moonloader\lib\?\init.lua;C:\Games\GTA San Andreas\moonloader\?.lua;C:\Games\GTA San Andreas\moonloader\?\init.lua;.\?.lua;C:\Games\GTA San Andreas\moonloader\lib\?.luac;C:\Games\GTA San Andreas\moonloader\lib\?\init.luac;C:\Games\GTA San Andreas\moonloader\?.luac;C:\Games\GTA San Andreas\moonloader\?\init.luac;.\?.luac
-[07:25:39.822168] (debug)	package.cpath = C:\Games\GTA San Andreas\moonloader\lib\?.dll;
-[07:25:39.827164] (system)	Loading script 'C:\Games\GTA San Andreas\moonloader\BagSpot.lua'...
-[07:25:39.827164] (debug)	New script: 0FAA773C
-[07:25:39.856959] (system)	BagSpot: Loaded successfully.
-[07:25:39.856959] (system)	Loading script 'C:\Games\GTA San Andreas\moonloader\mixscript.lua'...
-[07:25:39.856959] (debug)	New script: 0FA5292C
-[07:25:39.873368] (system)	MixScript: Loaded successfully.
-[07:25:39.873368] (system)	Loading script 'C:\Games\GTA San Andreas\moonloader\MoneybagHunter.lua'...
-[07:25:39.873368] (debug)	New script: 0FA530D4
-[07:25:39.879161] (system)	Moneybag Hunter: Loaded successfully.
-[07:25:45.800000] (system)	Installing post-load hooks...
-[07:25:45.800000] (system)	Hooks installed.
-[07:27:46.790142] (system)	Unloading...
-[07:27:46.790142] (system)	BagSpot: Script terminated. (0FAA773C)
-[07:27:46.791426] (system)	MixScript: Script terminated. (0FA5292C)
-[07:27:46.794920] (system)	Moneybag Hunter: Script terminated. (0FA530D4)
-[07:27:46.804623] (system)	Session terminated.
+[01:53:34.835632] (info)	Working directory: C:\Games\GTA San Andreas\moonloader
+[01:53:34.835632] (debug)	FP Control: 0009001F
+[01:53:34.835632] (debug)	Game: GTA SA 1.0.0.0 US
+[01:53:34.835632] (system)	Installing pre-game hooks...
+[01:53:34.837631] (system)	Hooks installed.
+[01:53:36.524158] (debug)	Initializing opcode handler table
+[01:53:36.524158] (debug)	package.path = C:\Games\GTA San Andreas\moonloader\lib\?.lua;C:\Games\GTA San Andreas\moonloader\lib\?\init.lua;C:\Games\GTA San Andreas\moonloader\?.lua;C:\Games\GTA San Andreas\moonloader\?\init.lua;.\?.lua;C:\Games\GTA San Andreas\moonloader\lib\?.luac;C:\Games\GTA San Andreas\moonloader\lib\?\init.luac;C:\Games\GTA San Andreas\moonloader\?.luac;C:\Games\GTA San Andreas\moonloader\?\init.luac;.\?.luac
+[01:53:36.524158] (debug)	package.cpath = C:\Games\GTA San Andreas\moonloader\lib\?.dll;
+[01:53:36.527158] (system)	Loading script 'C:\Games\GTA San Andreas\moonloader\BagSpot.lua'...
+[01:53:36.527158] (debug)	New script: 103F9E54
+[01:53:36.811327] (system)	BagSpot: Loaded successfully.
+[01:53:36.811327] (system)	Loading script 'C:\Games\GTA San Andreas\moonloader\mixscript.lua'...
+[01:53:36.811327] (debug)	New script: 16013E4C
+[01:53:36.825591] (system)	MixScript: Loaded successfully.
+[01:53:36.825591] (system)	Loading script 'C:\Games\GTA San Andreas\moonloader\MoneybagHunter.lua'...
+[01:53:36.825591] (debug)	New script: 103A8404
+[01:53:36.840592] (system)	Moneybag Hunter: Loaded successfully.
+[01:53:47.244172] (system)	Installing post-load hooks...
+[01:53:47.244172] (system)	Hooks installed.
+[02:38:08.848872] (system)	Unloading...
+[02:38:08.848872] (system)	BagSpot: Script terminated. (103F9E54)
+[02:38:08.850873] (system)	MixScript: Script terminated. (16013E4C)
+[02:38:08.852875] (system)	Moneybag Hunter: Script terminated. (103A8404)
+[02:38:08.869906] (system)	Session terminated.

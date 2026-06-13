@@ -16,6 +16,7 @@ local flipKeyEnabled = imgui.new.bool(false)
 local vehicleHopEnabled = imgui.new.bool(false)
 local speedBoostEnabled = imgui.new.bool(false)
 
+
 -- Config persistence
 local CFG_PATH = "config/mixscript.cfg"
 
@@ -42,17 +43,9 @@ local antiFall = {
     orig2 = { 0xD8, 0x65, 0x04 },
 }
 
--- Speed boost state
-local sb = {
-    holdTime = 0,
-    smoothX = 0, smoothY = 0, smoothZ = 0,
-    hadVehicle = false,
-    MAX_SPEED = 250.0,
-    ACCEL_START = 0.1,
-    ACCEL_INCREASE = 0.003,
-    ACCEL_MAX = 2.5,
-    SMOOTH_FACTOR = 0.15,
-}
+-- Speed boost: hold-based ramp (XSF-style multiply current velocity)
+local sbMultiplier = imgui.new.float(1.02)
+local sbProgress = 0
 
 -- CONFIG
 local CONFIG = {
@@ -214,6 +207,7 @@ local function saveConfig()
         flipKeyEnabled = flipKeyEnabled[0],
         vehicleHopEnabled = vehicleHopEnabled[0],
         speedBoostEnabled = speedBoostEnabled[0],
+        sbMultiplier = sbMultiplier[0],
         mathMinDelay = mathMinDelay[0],
         mathMaxDelay = mathMaxDelay[0],
         reactMinDelay = reactMinDelay[0],
@@ -249,6 +243,9 @@ local function loadConfig()
     if t.flipKeyEnabled ~= nil then flipKeyEnabled[0] = t.flipKeyEnabled end
     if t.vehicleHopEnabled ~= nil then vehicleHopEnabled[0] = t.vehicleHopEnabled end
     if t.speedBoostEnabled ~= nil then speedBoostEnabled[0] = t.speedBoostEnabled end
+    if t.sbMultiplier ~= nil then
+        sbMultiplier[0] = t.sbMultiplier
+    end
     if t.mathMinDelay ~= nil then
         mathMinDelay[0] = t.mathMinDelay
         CONFIG.MATH_MIN_DELAY = t.mathMinDelay
@@ -276,24 +273,10 @@ local function zeroVec(base)
 end
 
 local function doAutoStop()
-    local vehAddr = readPtr(VEHICLE_POINTER_SELF)
-    if vehAddr == 0 then return end
-    local untilTime = os.clock() + 0.35
-    while os.clock() < untilTime do
-        wait(0)
-        local v2 = readPtr(VEHICLE_POINTER_SELF)
-        if v2 == 0 then break end
-        local sx = readFloat(v2 + VEH_SPEED)
-        local sy = readFloat(v2 + VEH_SPEED + 4)
-        local sz = readFloat(v2 + VEH_SPEED + 8)
-        if math.sqrt(sx*sx + sy*sy + sz*sz) < 0.05 then break end
-        writeFloat(v2 + VEH_SPEED, sx * 0.78)
-        writeFloat(v2 + VEH_SPEED + 4, sy * 0.78)
-        writeFloat(v2 + VEH_SPEED + 8, sz * 0.78)
-        writeFloat(v2 + VEH_SPIN, 0.0)
-        writeFloat(v2 + VEH_SPIN + 4, 0.0)
-        writeFloat(v2 + VEH_SPIN + 8, 0.0)
-    end
+    local v2 = readPtr(VEHICLE_POINTER_SELF)
+    if v2 == 0 then return end
+    zeroVec(v2 + VEH_SPEED)
+    zeroVec(v2 + VEH_SPIN)
     printStringNow("~w~STOP", 300, 1.0)
 end
 
@@ -321,82 +304,27 @@ local function doVehicleHop()
     local v2 = readPtr(VEHICLE_POINTER_SELF)
     if v2 == 0 then return end
     local sz = readFloat(v2 + VEH_SPEED + 8)
-    if sz < 0.25 then
-        local hop = 0.25
-        if sz < -0.1 then hop = 1.0 end
+    if sz < 0.15 then
+        local hop = 0.08
+        if sz < -0.1 then hop = 0.25 end
         writeFloat(v2 + VEH_SPEED + 8, sz + hop)
     end
 end
 
-local function clamp(val, min, max)
-    if val < min then return min end
-    if val > max then return max end
-    return val
-end
-
-local function lerp(a, b, t)
-    return a + (b - a) * t
-end
-
-local function getFwdDir(vehAddr)
-    local sx = readFloat(vehAddr + VEH_SPEED)
-    local sy = readFloat(vehAddr + VEH_SPEED + 4)
-    local hspd = math.sqrt(sx*sx + sy*sy)
-    if hspd > 0.5 then
-        return sx / hspd, sy / hspd
-    end
-    local mat = readPtr(vehAddr + 20)
-    if mat == 0 then return 0, 0 end
-    local fx = readFloat(mat + 16)
-    local fy = readFloat(mat + 20)
-    local flen = math.sqrt(fx*fx + fy*fy)
-    if flen < 0.01 then return 0, 0 end
-    return fx / flen, fy / flen
-end
-
 local function doSpeedBoost()
     local v2 = readPtr(VEHICLE_POINTER_SELF)
-    if v2 == 0 then
-        sb.hadVehicle = false
-        return
-    end
-    if not sb.hadVehicle then
-        sb.smoothX = readFloat(v2 + VEH_SPEED)
-        sb.smoothY = readFloat(v2 + VEH_SPEED + 4)
-        sb.smoothZ = readFloat(v2 + VEH_SPEED + 8)
-        sb.hadVehicle = true
-    end
-    sb.holdTime = sb.holdTime + 1
+    if v2 == 0 then return end
+
+    sbProgress = 1.0
+    local mult = 1.0 + (sbProgress * (sbMultiplier[0] - 1.0))
+
     local sx = readFloat(v2 + VEH_SPEED)
     local sy = readFloat(v2 + VEH_SPEED + 4)
     local sz = readFloat(v2 + VEH_SPEED + 8)
-    local hspd = math.sqrt(sx*sx + sy*sy)
-    if hspd < sb.MAX_SPEED then
-        local dx, dy = getFwdDir(v2)
-        if dx ~= 0 or dy ~= 0 then
-            local currentAccel = sb.ACCEL_START + (sb.holdTime * sb.ACCEL_INCREASE)
-            if currentAccel > sb.ACCEL_MAX then currentAccel = sb.ACCEL_MAX end
-            local targetHspd = hspd + currentAccel
-            if targetHspd > sb.MAX_SPEED then targetHspd = sb.MAX_SPEED end
-            local newX = dx * targetHspd
-            local newY = dy * targetHspd
-            sb.smoothX = lerp(sb.smoothX, newX, sb.SMOOTH_FACTOR)
-            sb.smoothY = lerp(sb.smoothY, newY, sb.SMOOTH_FACTOR)
-            sb.smoothZ = lerp(sb.smoothZ, sz, sb.SMOOTH_FACTOR)
-            writeFloat(v2 + VEH_SPEED, sb.smoothX)
-            writeFloat(v2 + VEH_SPEED + 4, sb.smoothY)
-            writeFloat(v2 + VEH_SPEED + 8, sb.smoothZ)
-            local spinX = readFloat(v2 + VEH_SPIN)
-            local spinY = readFloat(v2 + VEH_SPIN + 4)
-            local spinZ = readFloat(v2 + VEH_SPIN + 8)
-            local spinLen = math.sqrt(spinX*spinX + spinY*spinY + spinZ*spinZ)
-            if spinLen > 0.5 then
-                writeFloat(v2 + VEH_SPIN, spinX * 0.9)
-                writeFloat(v2 + VEH_SPIN + 4, spinY * 0.9)
-                writeFloat(v2 + VEH_SPIN + 8, spinZ * 0.9)
-            end
-        end
-    end
+
+    writeFloat(v2 + VEH_SPEED, sx * mult)
+    writeFloat(v2 + VEH_SPEED + 4, sy * mult)
+    writeFloat(v2 + VEH_SPEED + 8, sz * mult)
 end
 
 -- Apply anti-fall at startup
@@ -521,7 +449,7 @@ imgui.OnFrame(function() return guiVisible[0] end, function()
     -- === VEHICLE FEATURES ===
     if imgui.CollapsingHeader("VEHICLE FEATURES##vehSection", imgui.TreeNodeFlags.DefaultOpen) then
         imgui.PushStyleColor(imgui.Col.FrameBg, imgui.ImVec4(0.12, 0.14, 0.22, 0.8))
-        imgui.BeginChild("##vehSectionBody", imgui.ImVec2(0, 92), true)
+        imgui.BeginChild("##vehSectionBody", imgui.ImVec2(0, 110), true)
 
         imgui.SetCursorPos(imgui.ImVec2(10, 8))
         local afLabel = antiFall.patched and "Anti-Fall (Patched)" or "Anti-Fall (Unpatched)"
@@ -543,6 +471,17 @@ imgui.OnFrame(function() return guiVisible[0] end, function()
 
         imgui.SetCursorPos(imgui.ImVec2(10, 56))
         imgui.Checkbox("Speed Boost  [L-Alt]", speedBoostEnabled)
+        if speedBoostEnabled[0] then
+            imgui.SameLine()
+            imgui.SetCursorPosX(210)
+            imgui.PushStyleColor(imgui.Col.Text, GUI_COLORS.muted)
+            imgui.TextUnformatted("Max x")
+            imgui.PopStyleColor()
+            imgui.SameLine()
+            imgui.PushItemWidth(80)
+            imgui.DragFloat("##sbMult", sbMultiplier, 0.01, 1.0, 1.8, "%.2f")
+            imgui.PopItemWidth()
+        end
 
         imgui.EndChild()
         imgui.PopStyleColor()
@@ -731,12 +670,11 @@ function main()
             doVehicleHop()
         end
 
-        -- Speed Boost (Left Alt - hold)
+        -- Speed Boost (Left Alt - hold) — progressive XSF-style
         if speedBoostEnabled[0] and isKeyDown(VK_LMENU) then
             doSpeedBoost()
-        elseif not isKeyDown(VK_LMENU) then
-            sb.holdTime = 0
-            sb.hadVehicle = false
+        else
+            sbProgress = 0
         end
 
         -- Math/Reaction pending display
