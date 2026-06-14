@@ -1,4 +1,4 @@
-﻿--[[
+--[[
     ┌─────────────────────────────────────────────────────────────────────────┐
     │                         BAGSPOT v4.0                                    │
     │              MoonLoader Script for SA-MP                                │
@@ -125,6 +125,7 @@ local CFG_PATH = getWorkingDirectory() .. "\\config\\bagspot.cfg"
 
 -- Fonts for ESP rendering
 local espFont = nil
+local countdownFont = nil
 local gpsArrowTex = nil
 
 local mainWindow = imgui.new.bool(false)
@@ -160,6 +161,29 @@ local moneybagPendingX = 0
 local moneybagPendingY = 0
 local moneybagPendingZ = 0
 local lastProxBeep = 0
+
+-- Moneybag Respawn Timer (from "found in Xsecs" chat message)
+local respawnActive = false
+local respawnEndTime = 0
+local respawnBagName = ""
+local respawnBeeped = false
+local myPlayerName = ""
+
+-- Debug log file
+local DEBUG_LOG = getWorkingDirectory() .. "\\config\\bagspot_debug.log"
+local function debugLog(...)
+    local args = {...}
+    local line = ""
+    for i, v in ipairs(args) do
+        line = line .. tostring(v) .. " "
+    end
+    line = os.date("[%H:%M:%S] ") .. line
+    local f = io.open(DEBUG_LOG, "a")
+    if f then
+        f:write(line .. "\n")
+        f:close()
+    end
+end
 
 -- GPS direction tracking (distance delta per frame)
 local prevPosDist = {}
@@ -801,13 +825,13 @@ local function importFromText(text, merge)
                                 duplicateCount = duplicateCount + 1
                                 break
                             end
-                        end
-                        
+
                         if not exists then
                             table.insert(savedPositions, newPos)
                         end
                     end
-                    
+                    end
+
                     savePositionsToFile()
                     local addedCount = #savedPositions - originalCount
                     local msg = string.format("Merged: Added %d new positions", addedCount)
@@ -1462,7 +1486,7 @@ local function renderGPSRing(cx, cy, radius, angleDeg, targetName, distance, del
                 deltaClr = 0xFFFF4444
             end
         end
-        local info = string.format("%s  %.0fm%s", targetName or "", distance or 0, deltaStr)
+        local info = string.format("%.0fm%s", distance or 0, deltaStr)
         renderFontDrawText(espFont, info, cx - radius - 10, cy + radius + 5, 0x80000000)
         renderFontDrawText(espFont, info, cx - radius - 11, cy + radius + 4, deltaClr)
     end
@@ -1666,34 +1690,93 @@ local function renderPositionESP()
     local playerX, playerY, playerZ = getCharCoordinates(PLAYER_PED)
     local scrW, scrH = getScreenResolution()
 
-    -- Draw focus overlay if a position is currently focused (orange pulsing line)
+    -- Draw focus overlay if a position is currently focused (pulsing line)
     if espFocusPosition then
         local dist = calculateDistance(playerX, playerY, playerZ, espFocusPosition.x, espFocusPosition.y, espFocusPosition.z)
         local sx, sy = getScreenPos(espFocusPosition.x, espFocusPosition.y, espFocusPosition.z)
+        local heading = getCharHeading(PLAYER_PED)
+        local behindAngle = getDirectionArrowDeg(playerX, playerY, heading, espFocusPosition.x, espFocusPosition.y)
+        local isBehind = math.abs(behindAngle) < 90
         if sx and sx > 0 and sx < scrW and sy > 0 and sy < scrH then
             local pulse = (math.sin(os.clock() * 3) + 1) / 2
-            local alpha = math.floor(0xF0 * (0.6 + pulse * 0.4))
-            local color = (alpha * 0x1000000) + 0xFF8800
-            renderDrawLine(scrW / 2, scrH, sx, sy, 2.0 + pulse, color)
-            renderDrawPolygon(sx - 4, sy - 4, 8, 8, 4, 0, color)
+            local alpha = math.floor(0xF0 * (0.5 + pulse * 0.5))
+            
+            -- Distance-based color: red(far) -> orange -> yellow -> green(close)
+            local r, g
+            if dist > 400 then
+                r, g = 255, 40
+            elseif dist > 150 then
+                local t = (dist - 150) / 250
+                r, g = 255, math.floor(40 + 215 * (1 - t))
+            elseif dist > 30 then
+                local t = (dist - 30) / 120
+                r, g = math.floor(255 - 100 * t), 255
+            else
+                r, g = 50, 255
+            end
+            local color = (alpha * 0x1000000) + (r * 0x10000) + (g * 0x100)
+            local glowColor = (math.floor(alpha * 0.3) * 0x1000000) + (r * 0x10000) + (g * 0x100)
+            
+            -- Glow layer + main line (Thicker for autofocus)
+            renderDrawLine(scrW / 2, scrH, sx, sy, 8.0 + pulse * 4, glowColor)
+            renderDrawLine(scrW / 2, scrH, sx, sy, 4.0 + pulse * 2, color)
+            
+            -- Direction chevrons along the line (point toward target)
+            local dx = sx - scrW / 2
+            local dy = sy - scrH
+            local angle = math.atan2(dy, dx)
+            local cs = math.cos(angle)
+            local sn = math.sin(angle)
+            for i = 1, 3 do
+                local t = i / 4
+                local cx = (scrW / 2) + dx * t
+                local cy = scrH + dy * t
+                local px = -sn * 4
+                local py = cs * 4
+                local ax = -cs * 5
+                local ay = -sn * 5
+                renderDrawLine(cx + ax + px, cy + ay + py, cx, cy, 1.5 + pulse * 0.5, color)
+                renderDrawLine(cx + ax - px, cy + ay - py, cx, cy, 1.5 + pulse * 0.5, color)
+            end
+            
+            renderDrawPolygon(sx - 5, sy - 5, 10, 10, 4, 0, color)
             if espFont then
-                local label = string.format(">> %s - %.0fm <<", espFocusPosition.name or "#?", dist)
-                renderFontDrawText(espFont, label, sx - 60, sy - 20, 0x80000000)
-                renderFontDrawText(espFont, label, sx - 61, sy - 21, color)
+                local dirArrow = ">>"
+                if prevFocusDist then
+                    dirArrow = (dist < prevFocusDist) and ">" or "<"
+                end
+                local label = string.format("%s %s %.0fm", dirArrow, espFocusPosition.name or "#?", dist)
+                renderFontDrawText(espFont, label, sx - 70, sy - 22, 0x80000000)
+                renderFontDrawText(espFont, label, sx - 71, sy - 23, color)
+            end
+        else
+            -- Off-screen or behind: direction arrow at screen edge
+            if espFont then
+                local ex, ey
+                if isBehind then
+                    ex, ey = scrW / 2, 30
+                else
+                    local hw = scrW / 2 - 20
+                    local hh = scrH / 2 - 40
+                    local rad = math.rad(heading + behindAngle)
+                    local scale = math.min(hw / math.abs(math.cos(rad) + 0.01), hh / math.abs(math.sin(rad) + 0.01))
+                    ex = scrW / 2 + math.cos(rad) * scale * 0.8
+                    ey = scrH / 2 + math.sin(rad) * scale * 0.8
+                end
+                local arrColor = behindAngle > 0 and 0xAA44FF44 or 0xAAFF4444
+                renderRotatedArrow(ex, ey, behindAngle, 10, arrColor, 0x44FFFFFF)
             end
         end
 
         if espFont then
-            local heading = getCharHeading(PLAYER_PED)
-            local focusAngle = getDirectionArrowDeg(playerX, playerY, heading, espFocusPosition.x, espFocusPosition.y)
             local focusDelta = prevFocusDist and (prevFocusDist - dist) or nil
             prevFocusDist = dist
-            local gpsCx = scrW / 2
-            local gpsCy = scrH - 60
-            renderGPSRing(gpsCx, gpsCy, 28, focusAngle, espFocusPosition.name, dist, focusDelta, 0xFFFF8800)
+            local gpsCx = scrW - 120
+            local gpsCy = scrH / 2
+            renderGPSRing(gpsCx, gpsCy, 28, behindAngle, espFocusPosition.name, dist, focusDelta, 0xFFFF8800)
         end
 
-        if dist < 2 then
+        if dist < 5 then
             espFocusPosition = nil
         end
     end
@@ -1716,7 +1799,7 @@ local function renderPositionESP()
                 local alpha = math.floor(0xCC * (1 - grad * 0.5))
                 local color = (alpha * 0x1000000) + baseColor
 
-                renderDrawLine(scrW / 2, scrH, sx, sy, 1.0, color)
+                -- renderDrawLine(scrW / 2, scrH, sx, sy, 1.0, color)
                 renderDrawPolygon(sx - 3, sy - 3, 6, 6, 4, 0, color)
 
                 if espFont then
@@ -1940,7 +2023,7 @@ local function renderMenu()
     imgui.PopStyleColor(3)
     
     if imgui.IsItemHovered() then
-        imgui.SetTooltip("Toggle auto-teleport on chat events (GoldPOT, Hunt, etc.)\\nHelps avoid bans by enabling/disabling quickly")
+        imgui.SetTooltip("Toggle auto-teleport on chat events (GoldPOT, Hunt, etc.)\nHelps avoid bans by enabling/disabling quickly")
     end
     
     imgui.SameLine()
@@ -2634,8 +2717,13 @@ function main()
         repeat wait(50) until isSampLoaded() and isSampAvailable()
     end
     
+    -- Clear debug log
+    local f = io.open(DEBUG_LOG, "w")
+    if f then f:write("--- BagSpot Debug Log ---\n"); f:close() end
+    
     -- Create fonts for ESP rendering
     espFont = renderCreateFont("Arial", 12, 5)
+    countdownFont = renderCreateFont("Arial", 10, 5)
     -- Load GPS arrow texture
     xpcall(function() gpsArrowTex = renderLoadTexture(getWorkingDirectory() .. "\\config\\gps-arrow.png") end, function() end)
     
@@ -2669,6 +2757,12 @@ function main()
     
     -- Load persistent config (auto-TP delay, toggles, etc.)
     loadConfig()
+    
+    -- Get player name for respawn timer detection
+    local pResult, pId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+    if pResult and type(sampGetPlayerNickname) == "function" then
+        myPlayerName = sampGetPlayerNickname(pId) or ""
+    end
     
     -- Chat commands
     sampRegisterChatCommand("spos", function(params)
@@ -2808,6 +2902,25 @@ function main()
         
         -- Render moneybag pickups (model 1550) (wrapped: crash-safe)
         pcall(renderMoneybagESP)
+
+        -- Moneybag respawn timer countdown display
+        if respawnActive then
+            local remaining = respawnEndTime - os.clock()
+            if remaining <= 0 then
+                if not respawnBeeped then
+                    playBeep(1000, 200)
+                    respawnBeeped = true
+                    debugLog("Countdown finished - RESPAWNED")
+                end
+                respawnActive = false
+            elseif countdownFont then
+                local cw, ch = getScreenResolution()
+                local secs = math.ceil(remaining)
+                local label = string.format("%s %ds", respawnBagName, secs)
+                renderFontDrawText(countdownFont, label, cw - 160, ch - 40, 0x80000000)
+                renderFontDrawText(countdownFont, label, cw - 161, ch - 41, 0xFFFFFF00)
+            end
+        end
 
 
         -- Proximity beep (every 2s when within 30m)
@@ -2987,8 +3100,6 @@ function renderMoneybagESP()
         local lineWidth = pulse > 0 and 1.5 + 3.0 * pulse or 1.5
 
         if sx > 0 and sx < scrW and sy > 0 and sy < scrH then
-            renderDrawLine(scrW / 2, scrH, sx, sy, lineWidth + 2.5, glowColor)
-            renderDrawLine(scrW / 2, scrH, sx, sy, lineWidth, color)
             renderDrawPolygon(sx - markerSize, sy - markerSize, markerSize * 2, markerSize * 2, 4, 0, color)
             local label = dist < 30 and string.format("%.0fm!", dist) or string.format("%.0fm", dist)
             if espFont then
@@ -3002,8 +3113,6 @@ function renderMoneybagESP()
         else
             local ex = math.max(15, math.min(scrW - 15, sx))
             local ey = math.max(55, math.min(scrH - 55, sy))
-            renderDrawLine(scrW / 2, scrH, ex, ey, 1.5 + pulse, 0x44FFFF00)
-            renderDrawLine(scrW / 2, scrH, ex, ey, 0.5 + pulse, 0x88FFFF00)
             if espFont then
                 renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 9, ey - 7, 0x80000000)
                 renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 8, ey - 8, 0xAAFFFF00)
@@ -3013,21 +3122,6 @@ function renderMoneybagESP()
         end
     end
 
-    if espFont then
-        local hudX, hudY = scrW - 15, 25
-        if bagCount > 0 then
-            renderFontDrawText(espFont, string.format("BAGS: %d", bagCount), hudX - 95, hudY - 1, 0x80000000)
-            renderFontDrawText(espFont, string.format("BAGS: %d", bagCount), hudX - 96, hudY - 2, 0xFFFFFF00)
-            local nearText = string.format("Nearest: %dm", math.floor(nearestDist))
-            if nearestDist < 30 then
-                renderFontDrawText(espFont, nearText .. " !", hudX - 125, hudY + 13, 0x80000000)
-                renderFontDrawText(espFont, nearText .. " !", hudX - 126, hudY + 12, 0xFFFF4444)
-            else
-                renderFontDrawText(espFont, nearText, hudX - 110, hudY + 13, 0x80000000)
-                renderFontDrawText(espFont, nearText, hudX - 111, hudY + 12, 0xFFFFFFFF)
-            end
-        end
-    end
 
     if not espFocusPosition and nearestBagId and moneyBags[nearestBagId] then
         local gpsCx = scrW / 2
@@ -3225,6 +3319,76 @@ function sampev.onServerMessage(color, text)
         if lower:find("you", 1, true) or (myName ~= "" and lower:find(myName, 1, true)) then
             msg("warn", ("Spectator detected: %s"):format(stripped))
             playBeep(440, 200)
+        end
+    end
+
+    -- Moneybag respawn timer detection
+    local strippedMsg = stripColorCodes(text)
+    local lowerMsg = strippedMsg:lower()
+    
+    -- Log all goldpot/found messages
+    if lowerMsg:find("goldpot", 1, true) or lowerMsg:find("found in", 1, true) then
+        debugLog("RAW:", strippedMsg)
+    end
+    
+    -- Detect: "found in Xsec" (streak) or "found the goldpot in Xsec" (first find)
+    local foundSecs = strippedMsg:match("found in ([%d%.]+)sec")
+    if not foundSecs then
+        foundSecs = strippedMsg:match("found the goldpot in ([%d%.]+)sec")
+    end
+    
+    if not foundSecs and lowerMsg:find("found", 1, true) and lowerMsg:find("sec", 1, true) then
+        debugLog("MISS: msg='" .. strippedMsg .. "'")
+    end
+    
+    if foundSecs then
+        -- Get player name
+        local localName = ""
+        local pRes, pId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+        if pRes and type(sampGetPlayerNickname) == "function" then
+            localName = sampGetPlayerNickname(pId) or ""
+        end
+        if localName == "" then localName = myPlayerName end
+        
+        debugLog("MyName='" .. localName .. "'")
+        
+        local msgLower = strippedMsg:lower()
+        local myLower = localName:lower()
+        local isMyBag = false
+        
+        -- Check name variants
+        if myLower ~= "" then
+            if msgLower:find(myLower, 1, true) then
+                isMyBag = true
+                debugLog("Name match: plain '" .. myLower .. "'")
+            end
+            if not isMyBag then
+                for i = 0, 999 do
+                    local withId = myLower .. "(" .. i .. ")"
+                    if msgLower:find(withId, 1, true) then
+                        isMyBag = true
+                        debugLog("Name match: with ID '" .. withId .. "'")
+                        break
+                    end
+                end
+            end
+        end
+        
+        if not isMyBag and msgLower:find("you found", 1, true) then
+            isMyBag = true
+            debugLog("Name match: 'you found'")
+        end
+        
+        debugLog("isMyBag=" .. tostring(isMyBag))
+        
+        if isMyBag then
+            respawnActive = true
+            respawnEndTime = os.clock() + 30
+            respawnBagName = espFocusPosition and espFocusPosition.name or "Moneybag"
+            respawnBeeped = false
+            debugLog("Respawn countdown: 30sec, bag=" .. respawnBagName)
+        else
+            debugLog("Name did NOT match - no countdown")
         end
     end
 end
