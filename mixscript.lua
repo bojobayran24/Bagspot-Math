@@ -16,7 +16,6 @@ local flipKeyEnabled = imgui.new.bool(false)
 local vehicleHopEnabled = imgui.new.bool(false)
 local speedBoostEnabled = imgui.new.bool(false)
 
-
 -- Config persistence
 local CFG_PATH = getWorkingDirectory() .. "\\config\\mixscript.cfg"
 
@@ -615,6 +614,10 @@ function main()
     clampDelay()
 
     math.randomseed(os.clock() * 10000)
+
+    addEventHandler("onScriptTerminate", function()
+        restoreAntiFall()
+    end)
 
     pcall(sampRegisterChatCommand, "autostatus", showStatus)
 
