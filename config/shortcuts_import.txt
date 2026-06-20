@@ -1,0 +1,349 @@
+﻿# GOLDPOT SHORTCUTS IMPORT
+# Format: Position Name | /shortcut
+# One entry per line. Lines starting with # are ignored.
+#
+# Just add your shortcut after the | (pipe) symbol.
+# Example:
+#   Grove Basketball | /grj
+#   LS Shopping Centre | /lsdive
+#
+# Total: 337 positions from SavedPositions.json
+#
+# --- START OF POSITIONS ---
+24 Carat Dogg | /party
+69 Store | /party
+8-Track Racing Dome | /grove
+A Burger from OG loc | /party
+A cannon in a house, LS | /hp
+A lake in a park | /ls
+A piece of cable | /sf
+A Shack in the Woods, Flint County | /ts1
+Abandoned Truck Terminal | /lsdive
+Ah shit, here we go again. | /grj
+Alamo | /drift2
+Alexanders Toys | /party
+Alhambra | /ust
+All Saint General Hospital | /ls
+Angel Pine Hoboshack | /chilliad
+Angel Pine Junkyard | /chilliad
+Angel Pine Sawmill | /chilliad
+Area 69 | /aa
+Atrium | /lsdive
+Avery Carrington | /lv
+Avery Construction | /lsdive
+Bank without a vault | /drift6
+Bayside Marina | /bayside
+Because we care, Phat Clothing | /bayside
+Big Bananas | /lvair
+Big Mike's Truck. Performance. Auto | /lsdive
+Big pointy building in SF downtown | /wang
+Big S Liqour and Deli | /party
+Big Skull | /lv
+Billboards covered shopping mall | /lv
+Bio Engineering | 
+Biowaste Well | /lsdive
+Blastin Fools Records | /ls
+Blaze It | 
+Bloody Shacks | /drift4
+Breakable Bridge | /grove
+Broffles Waffles | /arch
+Bub's Hardware | /drift6
+Burn Baby Burn | /grj
+Burned House | /lsdive
+C.R.A.S.H | /lvair
+Cactus Bar | /drift2
+Candy Suxxx | /party
+Carniceria | /grove
+Casino Robbed By CJ | /lv
+Casino still in construction | /lv
+Cave | /chilliad
+Centerpoint | /drift4
+Chef Mings | /ls
+Chinese Theater | /ls
+CHUCKUP | /lvair
+City Hall | /arch
+Cj is Home | /grove
+CJ's first coffee | /grove
+Cj's First Spawn | /grove
+CJ's first tagging mission location | /grove
+Cloverleaf Junction | /ls
+Cobra Martial Arts | /trans
+College | /ts3
+Come First Every Time | /lvair
+Cop Art | /trans
+Credit And Commerce Bank | /party
+Crippen Memorial Hospital | /arch
+Cult Farm | /ts1
+Dam Camper Park | /dam
+Darkest Tunnel | /ts1
+Demolition in progress | /lv
+Desert Bait Shop | /bayside
+Desert Bowling | /drift2
+Desert Castle | /drift2
+Deserted Bodybags | /aa
+Deserted Snake Farm | /aa
+Development Opportunity | /trans
+Diamond Specialists | /ls
+Dick's Sounds | /lv
+Dillimore PD | /lsdive
+Discharger Evacuator III | /ls
+Downtown Square | /wang
+Dragon | /lv
+Dragon lovers' casino | /lv
+Dried Lake | /drift2
+Drive Thru Cluckin' Bell | /grove
+Drive Thru Confessions | /drift6
+Drive Thru Mental Clinic | /lvair
+Drive-in theatre | /drift2
+Easter Basin Naval Base | /ts2
+El Quebrados water supply | /dam
+Emerald Isle | /lv
+Emmet | /grove
+Fake casino chips factory | /trans
+Fake Stairs | /lv
+Fill er up in Style | 
+First Hairdresser | /grove
+First Meal | /grove
+Five Identical Buildings | /wang
+Forgotten Building in North Rock | /grove
+Fountain of Youth | /drift2
+Four Big Wheels | /lvair
+Four Tennis Court | /ls
+Gangsta Bail Bonds | /ust
+Gant Bridge mural | /trans
+Garden Center | /arch
+Gaydar Station | 
+Ghost Graffiti | /ls
+Ghostly Town | /dam
+Giant Desert Chicken | /aa
+Giant Desert Cow | /drift2
+Graveless cemetery | /drift2
+Graveyard | /ls
+Gravy Train | /lv
+Great Signal Up here! | /drift2
+Grotti Dealership | /wang
+Grove Basketball | /grove
+Guitar-Shaped Pool | /lv
+Half Cocked | /ls
+Hannibal Liquor | /lsdive
+Harry Plums Wholesale Fruit | /ts1
+Hazarous Materials Response Team | /lvair
+Helena Wankstein's Home | /ts1
+Herro, Welcome to China | /lv
+HI K69 | /drift2
+Hidden Tunnel LS | /ust
+Hippy Shopper | /ls
+Home of the Bandits | /lvair
+Homerun! | /trans
+Homies Sharp | /ls
+Hoover dam | /dam
+Horseshoes | /ts1
+Hot water geyser | /drift2
+Huge mine | /quarry
+I bet my Hdra can land on that Ship | /ts2
+I can see the whole world from here | /aa
+Ideal Homies Store | /grove
+If I owned all this oil | /drift2
+In Los Santos Airport | /lsair
+Inside The Giant Donut | /lsdive
+Interglobal Television | /lsdive
+It's a Midtown Madness | /sf
+It's the Vinyl Countdown | /ls
+It's the Vinyl Countdown! | /ls
+Jay's Diner | /bayside
+Jazz Mags | 
+Jefferson Motel | /grj
+Jellystone International | /lsdive
+Jesus Saves | /grove
+Jetty Lounge | 
+Jizzy's  girl is kidnapped | /trans
+Joint Festival | /wang
+Kerosine tank | /sfair
+Large chemical plant | /sfair
+Le Sex Shoppe | /lv
+Learn to be a captain! | /bayside
+Learning to drive is Hard | /trans
+Lets play some golf! | /lvair
+Let's say a prayer | /sf
+Lets visit the coke factory | /trans
+LightHouse | /party
+Lighthouse Ruins | /bayside
+Linden Station | /lvair
+Lipstick | /lv
+Little Lady | 
+London, Los Santos, Liberty City | /ls
+Longest ramp in GTA | /dam
+Los Santos Carousel | /party
+Los Santos Prison | /grove
+Los Varrios Aztecas for Life | /ust
+Loving a Loan | /lsdive
+LS' Biggest Ammu-Nation | /ls
+LS Bomb Shop | /ust
+LS Eyeworks | /ls
+LS Fashions | /ls
+LS Junkyard | /ust
+LS Opera | /ls
+LS Shopping Centre | /lsdive
+LS Train Yard | /ust
+LS: Breakable SPRUNK sign | /grove
+LSPD | /ust
+Lust for Men | /party
+LV Bomb Shop | /lv
+LV City planning department | /lv
+Madd Dogg ain't Home | /lsdive
+Market Station | /ls
+Meet me a the film Studio | /ls
+Memorial Plaque | /chilliad
+Mexian Food & Salvadorean Food | /ust
+Michelle's Auto Repair | /otto
+Midair Burger | /otto
+Military Fuel Depot | /lvair
+Milkshake | /ls
+Miller & Son | /lsdive
+Millie Perkins House | /lvair
+Missionary Hill TV Station | /drift1
+Mountian Hole | /chilliad
+Movie Star Tour | /ls
+Mr Grants Bike Shed | /lsdive
+Mt. Chilliad hill-house | /chilliad
+Mullholiday and Dulaly | /wang
+Mysteriour shack near Northstart Rock | /hp 
+Nice Buns | /drift6
+Nice Wheelchair | /drift6
+No easter eggs up here | /sf
+Nude Strippers Daily | /lv
+Observatory | /drift3
+Oil Refinery | /drift2
+Olympic Market | /ls
+on top of the cock-rock | /aa
+Palm Trees in SF | /arch
+Pan Mexicano | /grove
+Papercut, let us fill your office | /party
+Pastageddon | /wang
+Pet Grooming | /ls
+Phat Liquor | /lsdive
+Photo Opportunity | /chilliad
+Pier 69 | /otto
+Pink (Ocean View) House | /aa
+Pipe goes under the water | /lv
+Plane Sign | /sfair
+Plug it in and enjoy | /sf
+Power Station in LS | /grove
+Power Video Rentals | /ls
+Powertool Paradise | /chilliad
+Psychic Special | /party
+Quite Humourous Comedy Club | /ls
+Racing the blind man | /lvair
+Rainbow stairs | /ust
+Redsands West Steakhouse | /lvair
+Reservoir Dregs | /ust
+Rest In Cement | /trans
+RIP Opposition | /arch
+Rodeo Hotel | /party
+Rodeo Style since 1888 | /party
+Rodriguez Iron Works | /lsdive
+Royal Casino | /lv
+Rusty, Old, Broken Walton | /lsdive
+San Andreas Federal Mint | /arch
+Sand Roller | /party
+Santa Maria Gym | /party
+Santos Investment | /grove
+SF Fire Station | /otto
+SF Hospital | /arch
+SF Police Station | /otto
+SF Vehicle Dealership | /wang
+SFSE Birthday House | /party
+Sherman Dam | /dam
+Ship docked in LS | /lsair
+Shody Used Autos | /lvair
+Shooting range | /drift2
+Sity Burgers | 
+Small dock near a ranch | /drift2
+Small SF Tunnel | /arch
+Sodom Sex Toys | /arch
+Solarin Industries | /lsdive
+Son Of a Beach | /party
+Southmost point in SA | /obj
+Souvenirs: Gifts, Hats & Bag | /lvair
+Spacey | /ls
+Spandex | /lsdive
+Spinning Sprunk | /lsdive
+Starballs | /ls
+Submarine | /otto
+Substandard | 
+Supa Save | /wang
+Sushi Man | /wang
+Sweet Johnson's House | /grove
+Taking the law into our own hands | /lv
+Tee Pee Motel | /dam
+Ten Green Bottles | /grove
+The Bahamas | /grove
+The Biffin Bridge Hotel | /wang
+The Big Spread Ranch | /aa
+The Book Emporium | /party
+The Corvin Stadium | /trans
+The Craw Bar | /lv
+The finest pizza in San Fierro | /otto
+The Fleischberg Factory | /drift4
+The Golden Palms | /grove
+The Green Sabre | /ust
+The Highest Building In San Fierro | /otto
+The highest wooden shack | /drift1
+The meat factory | /ts3
+The ol' Camper Park | /ts1
+The pink obeo | /drift6
+The Pirate bay home, real pirate ship | /lv
+The S.W.A.T Break in | /grove
+The Ship Cabin | /sf
+The Smokin Beef Grill | /drift2
+The Strip sex shop | /lv
+The USS Nummutz | /otto
+The Wizard Of Ass | /party
+Tony's Liquor | /grove
+Top of the pyramid | /lv
+Totally Nude | /grove
+Toy Corner | /ls
+Trailerpark at sea | /ts1
+Train sheds | /lvair
+Tram Depot | /wang
+Trashed Vice City Maps | /chilliad
+Tree House | /ts1
+Tuff Nut Donuts | /sf
+Tunnel under the train tracks | /ust
+Turning Trailers into Homes | /ts1
+Turning Trick, Advanced Motoring LV | /bs
+Two Leaning pylons | /dam
+U Get Inn Motel | /drift2
+UFO bar | /drift2
+UFO House | /lsdive
+Ugaladajara Jewelry Plaza | /ust
+Under Frederick Bridge | /lvair
+Under The Bridge | /otto
+Underneath the Giant Sphinx | /lv
+Underwater Tunnel | /otto
+Unfinished buildin near the skatepark | /sp
+Unused Bombshop in SF | /otto
+Unused Pay N Spray | /lv
+Vank Hoff in the park | /wang
+Venturas Steaks | /drift9
+Verona Beach Pier | /party
+Vice | /lv
+Village Ruins | /drift2
+Vinewood Wigs | /ls
+Wanted Exports | /ts1
+We have gas | /lsdive
+Wedding Tackle | /lv
+Welcome to Dirtring! | /ts3
+Welcome to The Truth's drugfarm | /ts1
+We'll dump your load | /ts1
+We'll keep you in the GREEN! | /lvair
+We've Got Crabs! | /wang
+Wholesale produce | 
+World class topless girls | /lv
+World of Coq | /ts2
+Wrecking Ball | /wang
+Yellow Bell Golf | /lvair
+YoYoJos Records | /ls
+Zapateria SORID | /party
+Zero RC Shop | /wang
+Zombotech | /wang

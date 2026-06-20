@@ -34,32 +34,15 @@ local encoding = require 'encoding'
 encoding.default = 'CP1251'
 local sampev = require 'lib.samp.events'
 
--- Vehicle stop helpers (for Auto-Stop at Focus)
-local VEHICLE_POINTER_SELF = 0x00B6F980
-local VEH_SPEED = 68
-local VEH_SPIN = 80
-
-local function readPtr(addr)
-    return ffi.cast("uint32_t*", addr)[0]
-end
-
-local function writeFloat(addr, val)
-    ffi.cast("float*", addr)[0] = val
-end
-
-local function zeroVec(base)
-    if base == 0 then return end
-    writeFloat(base, 0.0)
-    writeFloat(base + 4, 0.0)
-    writeFloat(base + 8, 0.0)
-end
-
 local function doAutoStopVeh()
-    local v2 = readPtr(VEHICLE_POINTER_SELF)
-    if v2 == 0 then return end
-    zeroVec(v2 + VEH_SPEED)
-    zeroVec(v2 + VEH_SPIN)
-    printStringNow("~w~FOCUS ~g~STOP", 300, 1.0)
+    if isCharInAnyCar(PLAYER_PED) then
+        local car = storeCarCharIsInNoSave(PLAYER_PED)
+        if car then
+            local x, y, z = getCarCoordinates(car)
+            setCarCoordinates(car, x, y, z)
+            printStringNow("~w~FOCUS ~g~STOP", 300, 1.0)
+        end
+    end
 end
 
 local C = { GOLD = "{BFA100}", GREEN = "{33AA33}", CYAN = "{33CCFF}", GRAY = "{888888}", RED = "{FF5555}", WHITE = "{FFFFFF}", YELLOW = "{FFFF00}", ORANGE = "{FFA500}" }
@@ -155,7 +138,7 @@ local soundAlert = imgui.new.bool(true)
 local moneyBags = {}
 local moneybagTPPending = false
 local moneybagTPTime = 0
-local moneybagTPDelay = 1
+local moneybagTPDelay = imgui.new.float(1.0)
 local moneybagTPCooldown = 0
 local moneybagPendingX = 0
 local moneybagPendingY = 0
@@ -168,6 +151,7 @@ local respawnEndTime = 0
 local respawnBagName = ""
 local respawnBeeped = false
 local myPlayerName = ""
+local respawnSplashEnd = 0
 
 -- Debug log file
 local DEBUG_LOG = getWorkingDirectory() .. "\\config\\bagspot_debug.log"
@@ -214,6 +198,7 @@ local targetPositionName = ""
 -- ESP Focus Mode (auto-focus from hints with toggle)
 local autoFocusEnabled = imgui.new.bool(true) -- Toggleable auto-focus from chat hints
 local autoStopFocus = imgui.new.bool(false) -- Auto-stop vehicle when near focus
+local autoFaceFocus = imgui.new.bool(true) -- Auto-face focus position after teleport
 local espFocusPosition = nil
 local espFocusTime = 0
 
@@ -232,7 +217,13 @@ local goldpotGroupFilter = imgui.new.int(0)
 local GOLD_GROUPS = {"All", "LS", "SF", "LV", "OTHER", "NEW"}
 local goldpotSearchFilter = imgui.new.char[64]("")
 
--- Goldpot Hint Analytics
+-- Edit goldpot entry state
+local showEditPopup = imgui.new.bool(false)
+local editGPEntryIdx = nil
+local editName = imgui.new.char[128]("")
+local editShortcut = imgui.new.char[32]("")
+local editGroupIdx = imgui.new.int(0)
+
 local hintAnalytics = {}
 local hintAnalyticsPath = getWorkingDirectory() .. "\\config\\HintAnalytics.json"
 local showAnalytics = imgui.new.bool(false)
@@ -611,8 +602,10 @@ function saveConfig()
         espDistance = espDistance[0],
         autoFocusEnabled = autoFocusEnabled[0],
         autoStopFocus = autoStopFocus[0],
+        autoFaceFocus = autoFaceFocus[0],
         showMoneybags = showMoneybags[0],
         autoMoneybagTP = autoMoneybagTP[0],
+        moneybagTPDelay = moneybagTPDelay[0],
         soundAlert = soundAlert[0],
         sortMode = sortMode[0],
     }
@@ -649,8 +642,10 @@ function loadConfig()
     if t.espDistance ~= nil then espDistance[0] = t.espDistance end
     if t.autoFocusEnabled ~= nil then autoFocusEnabled[0] = t.autoFocusEnabled end
     if t.autoStopFocus ~= nil then autoStopFocus[0] = t.autoStopFocus end
+    if t.autoFaceFocus ~= nil then autoFaceFocus[0] = t.autoFaceFocus end
     if t.showMoneybags ~= nil then showMoneybags[0] = t.showMoneybags end
     if t.autoMoneybagTP ~= nil then autoMoneybagTP[0] = t.autoMoneybagTP end
+    if t.moneybagTPDelay ~= nil then moneybagTPDelay[0] = t.moneybagTPDelay end
     if t.soundAlert ~= nil then soundAlert[0] = t.soundAlert end
     if t.sortMode ~= nil then sortMode[0] = t.sortMode end
 end
@@ -930,6 +925,22 @@ end
 local function matchGoldpotDatabase()
     if not goldpotDBLoaded then return end
     
+    -- Remove stale _fromSaved entries (saved positions that were renamed or deleted)
+    for i = #goldpotDB, 1, -1 do
+        if goldpotDB[i]._fromSaved then
+            local stillExists = false
+            if goldpotDB[i].savedIndex then
+                local pos = savedPositions[goldpotDB[i].savedIndex]
+                if pos and normalizeNameDB(pos.name) == normalizeNameDB(goldpotDB[i].name) then
+                    stillExists = true
+                end
+            end
+            if not stillExists then
+                table.remove(goldpotDB, i)
+            end
+        end
+    end
+    
     for _, entry in ipairs(goldpotDB) do
         entry.saved = false
         entry.savedIndex = nil
@@ -950,6 +961,27 @@ local function matchGoldpotDatabase()
                     break
                 end
             end
+        end
+    end
+    
+    -- Add unmatched saved positions to goldpotDB so they appear in the DB view
+    for j, pos in ipairs(savedPositions) do
+        local alreadyInDB = false
+        for _, entry in ipairs(goldpotDB) do
+            if entry.savedIndex == j then
+                alreadyInDB = true
+                break
+            end
+        end
+        if not alreadyInDB and pos.name and pos.name ~= "" then
+            table.insert(goldpotDB, {
+                name = pos.name,
+                shortcut = pos.shortcut or "",
+                group = pos.group or "OTHER",
+                saved = true,
+                savedIndex = j,
+                _fromSaved = true
+            })
         end
     end
 end
@@ -1006,8 +1038,8 @@ end
 local function saveGoldpotNEW()
     local newEntries = {}
     for _, entry in ipairs(goldpotDB) do
-        if entry.group == "NEW" then
-            table.insert(newEntries, {name = entry.name, group = "NEW", saved = entry.saved or false})
+        if not entry._fromSaved and (entry.group == "NEW" or entry._edited) then
+            table.insert(newEntries, {name = entry.name, shortcut = entry.shortcut or "", group = entry.group, saved = entry.saved or false, _edited = entry._edited or false})
         end
     end
     if #newEntries == 0 then return true end
@@ -1034,20 +1066,26 @@ local function loadGoldpotNEW()
         if success and type(data) == "table" then
             for _, entry in ipairs(data) do
                 -- Check if already in goldpotDB (might have been added from allpositions.txt)
-                local exists = false
+                local found = false
+                local existing
                 for _, existing in ipairs(goldpotDB) do
                     if normalizeNameDB(existing.name) == normalizeNameDB(entry.name) then
-                        exists = true
+                        found = true
+                        -- Apply edits (shortcut, group) on reload
+                        if entry.shortcut and entry.shortcut ~= "" then existing.shortcut = entry.shortcut end
+                        if entry.group and entry.group ~= "" then existing.group = entry.group end
+                        if entry._edited then existing._edited = true end
                         break
                     end
                 end
-                if not exists then
+                if not found then
                     table.insert(goldpotDB, {
                         name = entry.name,
                         shortcut = entry.shortcut or "",
-                        group = "NEW",
+                        group = entry.group or "NEW",
                         saved = false,
-                        savedIndex = nil
+                        savedIndex = nil,
+                        _edited = entry._edited or false
                     })
                 end
             end
@@ -1055,6 +1093,61 @@ local function loadGoldpotNEW()
         end
     end
     return true
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- BATCH SHORTCUT IMPORT
+-- ─────────────────────────────────────────────────────────────────────────────
+
+local SHORTCUTS_IMPORT_PATH = getWorkingDirectory() .. "\\config\\shortcuts_import.txt"
+
+local function batchImportShortcuts()
+    local file = io.open(SHORTCUTS_IMPORT_PATH, "r")
+    if not file then
+        msg("error", "shortcuts_import.txt not found in config/")
+        return false
+    end
+    local content = file:read("*a")
+    file:close()
+    if not content or content == "" then
+        msg("error", "shortcuts_import.txt is empty")
+        return false
+    end
+    
+    local imported = 0
+    for line in content:gmatch("[^\r\n]+") do
+        local trimmed = line:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" and not trimmed:match("^#") then
+            local name, shortcut = trimmed:match("^%s*(.-)%s*|%s*(/%w+)%s*$")
+            if name and shortcut then
+                local nameNorm = normalizeNameDB(name)
+                if nameNorm ~= "" then
+                    for _, entry in ipairs(goldpotDB) do
+                        if normalizeNameDB(entry.name) == nameNorm then
+                            entry.shortcut = shortcut
+                            if not entry._fromSaved then
+                                entry._edited = true
+                            end
+                            if entry.saved and entry.savedIndex and savedPositions[entry.savedIndex] then
+                                savedPositions[entry.savedIndex].shortcut = shortcut
+                            end
+                            imported = imported + 1
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    if imported > 0 then
+        savePositionsToFile()
+        saveGoldpotNEW()
+        msg("found", string.format("Imported %d shortcuts", imported))
+    else
+        msg("error", "No shortcuts were imported. Check format: Name | /shortcut")
+    end
+    return imported > 0
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -1337,6 +1430,22 @@ local function teleportToPosition(pos)
     
     -- Fix camera
     restoreCameraJumpcut()
+    
+    -- Auto-face focus position after teleport
+    if autoFaceFocus[0] and espFocusPosition then
+        local dx = espFocusPosition.x - pos.x
+        local dy = espFocusPosition.y - pos.y
+        if math.abs(dx) > 0.01 or math.abs(dy) > 0.01 then
+            local heading = math.deg(math.atan2(dx, dy))
+            if heading < 0 then heading = heading + 360 end
+            if isCharInAnyCar(PLAYER_PED) then
+                local car = storeCarCharIsInNoSave(PLAYER_PED)
+                if car then setCarHeading(car, heading) end
+            else
+                setCharHeading(PLAYER_PED, heading)
+            end
+        end
+    end
     
     -- Force sync with server
     if isSampAvailable() then
@@ -1816,12 +1925,14 @@ local function renderPositionESP()
                         end
                     end
                     local label = (pos.name or ("#" .. i)) .. string.format(" (%.0fm)", dist)
-                    renderFontDrawText(espFont, label, sx + 6, sy - 8, 0x80000000)
-                    renderFontDrawText(espFont, label, sx + 5, sy - 9, color)
+                    local tx = math.min(sx + 6, scrW - 160)
+                    renderFontDrawText(espFont, label, tx, sy - 8, 0x80000000)
+                    renderFontDrawText(espFont, label, tx - 1, sy - 9, color)
 
                     if deltaStr ~= "" then
-                        renderFontDrawText(espFont, deltaStr, sx + 9, sy + 6, 0x80000000)
-                        renderFontDrawText(espFont, deltaStr, sx + 8, sy + 5, deltaClr)
+                        local dx = math.min(sx + 9, scrW - 60)
+                        renderFontDrawText(espFont, deltaStr, dx, sy + 6, 0x80000000)
+                        renderFontDrawText(espFont, deltaStr, dx - 1, sy + 5, deltaClr)
                     end
                 end
             end
@@ -1862,6 +1973,67 @@ imgui.OnInitialize(function()
     colors[imgui.Col.ScrollbarGrab] = imgui.ImVec4(0.3, 0.3, 0.4, 0.8)
     colors[imgui.Col.Border] = imgui.ImVec4(0.3, 0.3, 0.4, 0.5)
 end)
+
+local function renderEditGoldpotPopup()
+    if showEditPopup[0] and editGPEntryIdx then
+        imgui.SetNextWindowPos(imgui.ImVec2(imgui.GetIO().DisplaySize.x / 2 - 150, imgui.GetIO().DisplaySize.y / 2 - 80))
+        imgui.SetNextWindowSize(imgui.ImVec2(300, 170))
+        if imgui.Begin("Edit Goldpot Entry", showEditPopup, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse) then
+            local filtered = getFilteredGoldpotEntries()
+            local entry = filtered[editGPEntryIdx]
+            if entry then
+                imgui.Text("Name:")
+                imgui.PushItemWidth(260)
+                imgui.InputText("##editName", editName, 128)
+                imgui.PopItemWidth()
+                imgui.Text("Shortcut (e.g. /lsdive):")
+                imgui.PushItemWidth(260)
+                imgui.InputText("##editShortcut", editShortcut, 32)
+                imgui.PopItemWidth()
+                imgui.Text("Group:")
+                local groupItems = ffi.new("const char*[6]", "All", "LS", "SF", "LV", "OTHER", "NEW")
+                imgui.Combo("##editGroup", editGroupIdx, groupItems, 6)
+                
+                imgui.Spacing()
+                imgui.Separator()
+                imgui.Spacing()
+                
+                local entryName = ffi.string(editName)
+                local entryShortcut = ffi.string(editShortcut)
+                local entryGroup = GOLD_GROUPS[editGroupIdx[0] + 1]
+                
+                if imgui.Button("Save", imgui.ImVec2(130, 0)) then
+                    entry.name = entryName
+                    entry.shortcut = entryShortcut
+                    entry.group = entryGroup
+                    entry._edited = true
+                    if entry.saved and entry.savedIndex and savedPositions[entry.savedIndex] then
+                        local sp = savedPositions[entry.savedIndex]
+                        sp.name = entryName
+                        sp.shortcut = entryShortcut
+                        sp.group = entryGroup
+                        savePositionsToFile()
+                    end
+                    saveGoldpotNEW()
+                    saveHintAnalytics()
+                    msg("found", "Updated: " .. entryName)
+                    showEditPopup[0] = false
+                end
+                
+                imgui.SameLine()
+                if imgui.Button("Cancel", imgui.ImVec2(130, 0)) then
+                    showEditPopup[0] = false
+                end
+            else
+                imgui.Text("Entry no longer exists.")
+                if imgui.Button("Close", imgui.ImVec2(130, 0)) then
+                    showEditPopup[0] = false
+                end
+            end
+        end
+        imgui.End()
+    end
+end
 
 local function renderMenu()
     imgui.SetNextWindowSize(imgui.ImVec2(650, 500), imgui.Cond.FirstUseEver)
@@ -2155,6 +2327,19 @@ local function renderMenu()
         imgui.SetTooltip("Automatically stop vehicle when within 2.5m of focus position")
     end
 
+    -- Auto-Face Focus toggle
+    imgui.SameLine()
+    local affColor = autoFaceFocus[0] and imgui.ImVec4(0.2, 0.7, 0.4, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
+    imgui.PushStyleColor(imgui.Col.Button, affColor)
+    if imgui.Button(autoFaceFocus[0] and "FaceFocus: ON" or "FaceFocus: OFF", imgui.ImVec2(105, 25)) then
+        autoFaceFocus[0] = not autoFaceFocus[0]
+        setStatusMessage(autoFaceFocus[0] and "Auto-face focus on teleport enabled" or "Auto-face focus on teleport disabled")
+    end
+    imgui.PopStyleColor()
+    if imgui.IsItemHovered() then
+        imgui.SetTooltip("After teleport, automatically rotate to face the active focus position")
+    end
+
     -- Moneybag Tracker toggle
     local mbColor = showMoneybags[0] and imgui.ImVec4(0.9, 0.7, 0.0, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
     imgui.PushStyleColor(imgui.Col.Button, mbColor)
@@ -2175,6 +2360,12 @@ local function renderMenu()
     if imgui.IsItemHovered() then
         imgui.SetTooltip("Auto-teleport to nearest moneybag every few seconds")
     end
+    imgui.SameLine()
+    imgui.PushItemWidth(80)
+    if imgui.SliderFloat("##mbTPDelay", moneybagTPDelay, 0.5, 10.0, "TP: %.1fs") then
+        if moneybagTPDelay[0] < 0.5 then moneybagTPDelay[0] = 0.5 end
+    end
+    imgui.PopItemWidth()
     imgui.SameLine()
     local soundColor = soundAlert[0] and imgui.ImVec4(0.2, 0.6, 0.8, 1.0) or imgui.ImVec4(0.5, 0.5, 0.5, 0.6)
     imgui.PushStyleColor(imgui.Col.Button, soundColor)
@@ -2338,6 +2529,8 @@ local function renderMenu()
         imgui.End()
     end
     
+    renderEditGoldpotPopup()
+    
     -- Delete confirmation
     if showConfirmDelete[0] then
         imgui.SetNextWindowPos(imgui.ImVec2(imgui.GetIO().DisplaySize.x / 2 - 150, imgui.GetIO().DisplaySize.y / 2 - 60))
@@ -2466,6 +2659,15 @@ function renderGoldpotDBView()
     local filtered = getFilteredGoldpotEntries()
     
     imgui.Text(string.format("Showing: %d/%d goldpots", #filtered, #goldpotDB))
+    imgui.SameLine()
+    imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(0.3, 0.5, 0.3, 1.0))
+    if imgui.Button("Import Shortcuts##gpshort", imgui.ImVec2(120, 20)) then
+        batchImportShortcuts()
+    end
+    imgui.PopStyleColor()
+    if imgui.IsItemHovered() then
+        imgui.SetTooltip("Reads config/shortcuts_import.txt and batch-applies shortcuts to matching positions")
+    end
     imgui.Separator()
     
     -- Database list
@@ -2534,6 +2736,19 @@ function renderGoldpotDBView()
                 imgui.PopStyleColor()
             end
             
+            imgui.SameLine()
+            imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(0.3, 0.5, 0.8, 1.0))
+            if imgui.Button("Edit##gped" .. idx, imgui.ImVec2(60, 25)) then
+                editGPEntryIdx = idx
+                ffi.copy(editName, entry.name or "")
+                ffi.copy(editShortcut, entry.shortcut or "")
+                for gi, gName in ipairs(GOLD_GROUPS) do
+                    if gName == entry.group then editGroupIdx[0] = gi - 1; break end
+                end
+                showEditPopup[0] = true
+            end
+            imgui.PopStyleColor()
+            
             imgui.Unindent()
         end
     end
@@ -2557,6 +2772,7 @@ function renderGoldpotDBView()
         -- ANALYTICS VIEW ---
         renderAnalyticsView()
     end
+
 end
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -2723,7 +2939,7 @@ function main()
     
     -- Create fonts for ESP rendering
     espFont = renderCreateFont("Arial", 12, 5)
-    countdownFont = renderCreateFont("Arial", 10, 5)
+    countdownFont = renderCreateFont("Arial", 16, 7)
     -- Load GPS arrow texture
     xpcall(function() gpsArrowTex = renderLoadTexture(getWorkingDirectory() .. "\\config\\gps-arrow.png") end, function() end)
     
@@ -2877,21 +3093,39 @@ function main()
         -- Update distance cache periodically for performance (wrapped: crash-safe)
         pcall(updateDistanceCache)
 
-        -- Auto-Stop at Focus (once per entry, not every frame — prevents getting stuck)
-        if autoStopFocus[0] and espFocusPosition then
-            local lok = isCharInAnyCar(PLAYER_PED)
-            if lok then
+        -- Auto-Stop at Focus or nearest moneybag pickup
+        if autoStopFocus[0] then
+            local targetX, targetY, targetZ
+            if espFocusPosition then
+                targetX, targetY, targetZ = espFocusPosition.x, espFocusPosition.y, espFocusPosition.z
+            elseif showMoneybags[0] and next(moneyBags) then
                 local px, py, pz = getCharCoordinates(PLAYER_PED)
                 if px then
-                    local dx = espFocusPosition.x - px
-                    local dy = espFocusPosition.y - py
-                    local dz = espFocusPosition.z - pz
-                    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                    if dist <= 2.5 and not autoStopped then
-                        doAutoStopVeh()
-                        autoStopped = true
-                    elseif dist > 3.0 then
-                        autoStopped = false
+                    local nearDist = 999999
+                    for _, pos in pairs(moneyBags) do
+                        local d = calculateDistance(px, py, pz, pos.x, pos.y, pos.z)
+                        if d < nearDist then
+                            nearDist = d
+                            targetX, targetY, targetZ = pos.x, pos.y, pos.z
+                        end
+                    end
+                end
+            end
+            if targetX then
+                local lok = isCharInAnyCar(PLAYER_PED)
+                if lok then
+                    local px, py, pz = getCharCoordinates(PLAYER_PED)
+                    if px then
+                        local dx = targetX - px
+                        local dy = targetY - py
+                        local dz = targetZ - pz
+                        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                        if dist <= 2 and not autoStopped then
+                            doAutoStopVeh()
+                            autoStopped = true
+                        elseif dist > 4 then
+                            autoStopped = false
+                        end
                     end
                 end
             end
@@ -2906,19 +3140,59 @@ function main()
         -- Moneybag respawn timer countdown display
         if respawnActive then
             local remaining = respawnEndTime - os.clock()
+            local cw, ch = getScreenResolution()
             if remaining <= 0 then
                 if not respawnBeeped then
                     playBeep(1000, 200)
                     respawnBeeped = true
+                    respawnSplashEnd = os.clock() + 2
                     debugLog("Countdown finished - RESPAWNED")
                 end
-                respawnActive = false
+                if os.clock() < respawnSplashEnd and countdownFont then
+                    local splash = ">>> RESPAWNED! <<<"
+                    renderFontDrawText(countdownFont, splash, cw / 2 - 105, ch - 200, 0x80000000)
+                    renderFontDrawText(countdownFont, splash, cw / 2 - 106, ch - 201, 0xFFFF4444)
+                else
+                    respawnActive = false
+                end
             elseif countdownFont then
-                local cw, ch = getScreenResolution()
                 local secs = math.ceil(remaining)
-                local label = string.format("%s %ds", respawnBagName, secs)
-                renderFontDrawText(countdownFont, label, cw - 160, ch - 40, 0x80000000)
-                renderFontDrawText(countdownFont, label, cw - 161, ch - 41, 0xFFFFFF00)
+                local label = string.format("%s - %d:%02d", respawnBagName, math.floor(secs / 60), secs % 60)
+                local pct = remaining / 30
+
+                -- Color gradient: Green (30s) -> Yellow (20s) -> Orange (10s) -> Red (5s) -> Pulse (<5s)
+                local r, g
+                if secs <= 5 then
+                    local pulse = 0.5 + 0.5 * math.sin(os.clock() * 8)
+                    r = math.floor(255 * pulse)
+                    g = math.floor(30 * pulse)
+                elseif secs <= 10 then
+                    local t = (secs - 5) / 5
+                    r = 255
+                    g = math.floor(80 * t)
+                elseif secs <= 20 then
+                    local t = (secs - 10) / 10
+                    r = math.floor(200 + 55 * t)
+                    g = math.floor(80 + 175 * t)
+                else
+                    local t = (secs - 20) / 10
+                    r = math.floor(80 + 175 * (1 - t))
+                    g = 255
+                end
+                local color = 0xFF000000 + (r * 0x10000) + (g * 0x100)
+
+                -- Progress bar
+                local barW, barH = 180, 6
+                local barX, barY = cw - 280, ch - 58
+                local fillW = barW * math.max(0, math.min(1, pct))
+                renderDrawPolygon(barX, barY, barW, barH, 4, 0, 0x66000000)
+                if fillW > 2 then
+                    renderDrawPolygon(barX, barY + 1, fillW, barH - 2, 4, 0, color)
+                end
+
+                -- Countdown text
+                renderFontDrawText(countdownFont, label, cw - 280, ch - 42, 0x80000000)
+                renderFontDrawText(countdownFont, label, cw - 281, ch - 43, color)
             end
         end
 
@@ -2963,13 +3237,13 @@ function main()
                         moneybagPendingZ = nearestPos.z
                         moneybagTPPending = true
                         moneybagTPTime = os.clock()
-                        msg("found", ("TP to moneybag in %ds..."):format(moneybagTPDelay))
+                        msg("found", ("TP to moneybag in %ds..."):format(moneybagTPDelay[0]))
                     end
                 end
             end
         end
         if moneybagTPPending then
-            local remaining = moneybagTPDelay - (os.clock() - moneybagTPTime)
+            local remaining = moneybagTPDelay[0] - (os.clock() - moneybagTPTime)
             if remaining <= 0 then
                 playBeep(800, 100)
                 setCharCoordinates(PLAYER_PED, moneybagPendingX, moneybagPendingY, moneybagPendingZ)
@@ -3056,6 +3330,7 @@ function renderMoneybagESP()
         if not moneyBags[id] then prevBagDist[id] = nil end
     end
 
+    -- First pass: draw glow beams from player to each bag (behind polygon markers)
     for id, pos in pairs(moneyBags) do
         local dist = calculateDistance(px, py, pz, pos.x, pos.y, pos.z)
         if dist < nearestDist then
@@ -3064,6 +3339,24 @@ function renderMoneybagESP()
             nearestBagAngle = getDirectionArrowDeg(px, py, playerHeading, pos.x, pos.y)
         end
         bagCount = bagCount + 1
+
+        local sx, sy = getScreenPos(pos.x, pos.y, pos.z)
+        if not sx then break end
+
+        if sx > 0 and sx < scrW and sy > 0 and sy < scrH then
+            local distT = math.max(0, math.min(1, 1 - dist / 800))
+            local beamAlpha = math.floor(0x44 * distT)
+            if beamAlpha > 8 then
+                local beamColor = (beamAlpha * 0x1000000) + 0xFFFF00
+                renderDrawLine(scrW / 2, scrH, sx, sy, 2.0 + 2.0 * distT, beamColor)
+                renderDrawLine(scrW / 2, scrH, sx, sy, 0.5 + 1.0 * distT, (beamAlpha * 2 * 0x1000000) + 0xFFFFFF)
+            end
+        end
+    end
+
+    -- Second pass: draw markers and labels
+    for id, pos in pairs(moneyBags) do
+        local dist = calculateDistance(px, py, pz, pos.x, pos.y, pos.z)
 
         local sx, sy = getScreenPos(pos.x, pos.y, pos.z)
         if not sx then break end
@@ -3096,29 +3389,41 @@ function renderMoneybagESP()
         local glowColor = ((math.floor(alpha * 0.3) % 256) * 0x1000000) + (r * 0x10000) + (g * 0x100) + b
         local textColor = (0xFF * 0x1000000) + (r * 0x10000) + (g * 0x100) + b
 
-        local markerSize = pulse > 0 and 4 + math.floor(6 * pulse) or 4
-        local lineWidth = pulse > 0 and 1.5 + 3.0 * pulse or 1.5
+        local markerSize = pulse > 0 and 4 + math.floor(8 * pulse) or 5
+        local lineWidth = pulse > 0 and 1.5 + 4.0 * pulse or 1.5
 
         if sx > 0 and sx < scrW and sy > 0 and sy < scrH then
+            -- Glow behind marker
+            local glowAlpha = math.floor(alpha * 0.25)
+            local glowBg = (glowAlpha * 0x1000000) + (r * 0x10000) + (g * 0x100) + b
+            renderDrawPolygon(sx - markerSize - 4, sy - markerSize - 4, (markerSize + 4) * 2, (markerSize + 4) * 2, 4, 0, glowBg)
+            -- Main marker
             renderDrawPolygon(sx - markerSize, sy - markerSize, markerSize * 2, markerSize * 2, 4, 0, color)
+
             local label = dist < 30 and string.format("%.0fm!", dist) or string.format("%.0fm", dist)
+            local tx = math.min(sx + 7, scrW - 65)
             if espFont then
-                renderFontDrawText(espFont, label, sx + 7, sy - 9, 0x80000000)
-                renderFontDrawText(espFont, label, sx + 6, sy - 10, textColor)
+                renderFontDrawText(espFont, label, tx, sy - 9, 0x80000000)
+                renderFontDrawText(espFont, label, tx - 1, sy - 10, textColor)
             end
             local arrowDeg = getDirectionArrowDeg(px, py, playerHeading, pos.x, pos.y)
-            local arrSize = pulse > 0 and 10 or 7
-            renderRotatedArrow(sx, sy - 18, arrowDeg, arrSize, 0xCCFFFFFF, 0x44FFFFFF)
+            local arrSize = pulse > 0 and 12 or 8
+            renderRotatedArrow(math.max(12, math.min(scrW - 12, sx)), sy - 20, arrowDeg, arrSize, 0xCCFFFFFF, 0x44FFFFFF)
             prevBagDist[id] = dist
         else
-            local ex = math.max(15, math.min(scrW - 15, sx))
-            local ey = math.max(55, math.min(scrH - 55, sy))
+            local ex = math.max(10, math.min(scrW - 10, sx))
+            local ey = math.max(50, math.min(scrH - 50, sy))
+            -- Glow beam around edge marker
+            local pulseGlow = 0.5 + 0.5 * math.abs(math.sin(now * 4))
+            local edgeGlow = math.floor(0x66 * pulseGlow) * 0x1000000 + 0xFFFF00
+            renderDrawPolygon(ex - 6, ey - 6, 12, 12, 4, 0, edgeGlow)
+            renderDrawPolygon(ex - 3, ey - 3, 6, 6, 4, 0, 0xAAFFFF00)
             if espFont then
-                renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 9, ey - 7, 0x80000000)
-                renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 8, ey - 8, 0xAAFFFF00)
+                renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 10, ey - 7, 0x80000000)
+                renderFontDrawText(espFont, string.format("%.0fm", dist), ex + 9, ey - 8, 0xAAFFFF00)
             end
             local offAngle = math.deg(math.atan2(sy - scrH/2, sx - scrW/2))
-            renderRotatedArrow(ex, ey - 16, offAngle, 6, 0xAAFFFF00)
+            renderRotatedArrow(ex, ey - 18, offAngle, 8, 0xAAFFFF00, 0x44FFFF00)
         end
     end
 
@@ -3272,12 +3577,21 @@ function sampev.onServerMessage(color, text)
         -- Show detected position
         playBeep(660, 150)
         playBeep(880, 200)
+        local shortDisplay = (targetPos.shortcut or "") ~= "" and (" ~ " .. targetPos.shortcut) or ""
         
-        msg("highlight", ("Position: %s"):format(targetPos.name))
+        msg("highlight", ("Position: %s"):format(targetPos.name .. shortDisplay))
         local px2, py2, pz2 = getCharCoordinates(PLAYER_PED)
         if px2 then
             msg("passive", ("Distance: %.0fm"):format(
                 calculateDistance(px2, py2, pz2, targetPos.x, targetPos.y, targetPos.z)))
+        end
+        if not autoTeleportEnabled[0] then
+            if shortDisplay ~= "" then
+                local shortClean = targetPos.shortcut:gsub("/", "")
+                printStringNow("~y~" .. targetPos.name .. "~n~~g~/" .. shortClean, 4000)
+            else
+                printStringNow("~y~" .. targetPos.name, 4000)
+            end
         end
         
         -- Auto-focus (only if enabled in menu)
@@ -3286,7 +3600,7 @@ function sampev.onServerMessage(color, text)
                 x = targetPos.x,
                 y = targetPos.y,
                 z = targetPos.z,
-                name = targetPos.name
+                name = targetPos.name .. shortDisplay
             }
             espFocusTime = os.clock()
         end
